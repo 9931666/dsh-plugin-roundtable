@@ -1,0 +1,211 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@huanlin/dsh-plugin-interpreters':
+        specifier: ^0.2.1
+        version: 0.2.1(schemastery@3.18.0)
+      '@huanlin/dsh-plugin-sleep':
+        specifier: ^0.1.0
+        version: 0.1.0
+      '@huanlin/dsh-plugin-ya-workspace-sidebar':
+        specifier: ^0.3.1
+        version: 0.3.1
+      '@huanlin/dsh-plugin-yet-another-subagent':
+        specifier: ^0.1.2
+        version: 0.1.2(schemastery@3.18.0)
+
+packages:
+
+  '@huanlin/dsh-plugin-interpreters@0.2.1':
+    resolution: {integrity: sha512-AzyFk0PWAVWalDj5OzHrX5TCgy1W7rMmGQhpxB8w1ZM4l62ITMR0CkudcCkbC0zoyDIZEFs7qaDRIZA09VXoTw==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.1-rc.1
+      '@deepseek-ai/dsh-client-connection': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-client-locale': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-client-runtime': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-client-ui-primitives': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-client-ui-settings-plugins': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-client-ui-slots': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-host-webserver': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-settings': ^0.1.0-rc.8
+      '@deepseek-ai/dsh-tools': ^0.1.0-rc.8
+      react: ^18.2.0
+      schemastery: ^3.18.0
+    peerDependenciesMeta:
+      '@deepseek-ai/cordis':
+        optional: true
+      '@deepseek-ai/dsh-client-connection':
+        optional: true
+      '@deepseek-ai/dsh-client-locale':
+        optional: true
+      '@deepseek-ai/dsh-client-runtime':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-primitives':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-settings-plugins':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-slots':
+        optional: true
+      '@deepseek-ai/dsh-host-webserver':
+        optional: true
+      '@deepseek-ai/dsh-settings':
+        optional: true
+      '@deepseek-ai/dsh-tools':
+        optional: true
+      react:
+        optional: true
+      schemastery:
+        optional: true
+
+  '@huanlin/dsh-plugin-sleep@0.1.0':
+    resolution: {integrity: sha512-5CZurm6LjZUDCL5o07X1Z0Yq6A9aJBe7ALNqzxpil4KbC/nyvKgN6X+/r+SRgG0dZWK9bE9Td8tnLOCG+5fnrA==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      '@deepseek-ai/dsh-tools': ^0.0.1-rc.1
+      cordis: ^4.0.0-rc.7
+    peerDependenciesMeta:
+      '@deepseek-ai/dsh-tools':
+        optional: true
+      cordis:
+        optional: true
+
+  '@huanlin/dsh-plugin-ya-workspace-sidebar@0.3.1':
+    resolution: {integrity: sha512-/Ca5ddcc0+oY2RW21ATJHS4vsEjFqjwQjCSuS7e+Es0J/PDgy5+ZwdL30NQQMz+8MSDL/JtLuEo/I/Te2E/Mbg==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@deepseek-ai/dsh-client-locale': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-runtime': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-conversation': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-primitives': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-sidebar': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-slots': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-invariants': ^0.0.1-rc.1
+      cordis: ^4.0.0-rc.7
+      react: ^18.2.0
+    peerDependenciesMeta:
+      '@deepseek-ai/dsh-client-locale':
+        optional: true
+      '@deepseek-ai/dsh-client-runtime':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-conversation':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-primitives':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-sidebar':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-slots':
+        optional: true
+      '@deepseek-ai/dsh-invariants':
+        optional: true
+      cordis:
+        optional: true
+      react:
+        optional: true
+
+  '@huanlin/dsh-plugin-yet-another-subagent@0.1.2':
+    resolution: {integrity: sha512-8q0qCZZK9qLGyCNb6/QiLHlLH7QMhzKIdsGl/4RuhxkfAcVevdwsbO1FRFZftxkJJMgL7VtxnNzTfYzR2EyUoQ==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@deepseek-ai/dsh-agent': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-connection': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-locale': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-runtime': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-conversation': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-primitives': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-settings': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-slots': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-client-ui-tool': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-host-apiproxy': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-invariants': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-jobs': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-llm': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-session': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-session-projection': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-subagent': ^0.0.1-rc.1
+      '@deepseek-ai/dsh-tools': ^0.0.1-rc.1
+      cordis: ^4.0.0-rc.7
+      react: ^18.2.0
+      schemastery: ^3.18.0
+    peerDependenciesMeta:
+      '@deepseek-ai/dsh-agent':
+        optional: true
+      '@deepseek-ai/dsh-client-connection':
+        optional: true
+      '@deepseek-ai/dsh-client-locale':
+        optional: true
+      '@deepseek-ai/dsh-client-runtime':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-conversation':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-primitives':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-settings':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-slots':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-tool':
+        optional: true
+      '@deepseek-ai/dsh-host-apiproxy':
+        optional: true
+      '@deepseek-ai/dsh-invariants':
+        optional: true
+      '@deepseek-ai/dsh-jobs':
+        optional: true
+      '@deepseek-ai/dsh-llm':
+        optional: true
+      '@deepseek-ai/dsh-session':
+        optional: true
+      '@deepseek-ai/dsh-session-projection':
+        optional: true
+      '@deepseek-ai/dsh-subagent':
+        optional: true
+      '@deepseek-ai/dsh-tools':
+        optional: true
+      cordis:
+        optional: true
+      react:
+        optional: true
+      schemastery:
+        optional: true
+
+  '@standard-schema/spec@1.1.0':
+    resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  cosmokit@1.8.1:
+    resolution: {integrity: sha512-PDBv4l90xZKrUsZ0vtoycgZpO/j4iFsqJXrAxsyBDsnQRI7ZMJXIjgDJsKNjd5L8jnVnnlrDCdhkFbTncgCVjQ==}
+
+  schemastery@3.18.0:
+    resolution: {integrity: sha512-Jw2uxjoyyqc/yeurmChUEc/jbi8GsrdXV/KmqRUDZXJAXAmrJiPsz8vKa17l/VckyzljHZ9oGaul443CQiXxtA==}
+
+snapshots:
+
+  '@huanlin/dsh-plugin-interpreters@0.2.1(schemastery@3.18.0)':
+    optionalDependencies:
+      schemastery: 3.18.0
+
+  '@huanlin/dsh-plugin-sleep@0.1.0':
+    dependencies:
+      schemastery: 3.18.0
+
+  '@huanlin/dsh-plugin-ya-workspace-sidebar@0.3.1': {}
+
+  '@huanlin/dsh-plugin-yet-another-subagent@0.1.2(schemastery@3.18.0)':
+    optionalDependencies:
+      schemastery: 3.18.0
+
+  '@standard-schema/spec@1.1.0': {}
+
+  cosmokit@1.8.1: {}
+
+  schemastery@3.18.0:
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      cosmokit: 1.8.1

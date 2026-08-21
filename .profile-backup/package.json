@@ -1,0 +1,22 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "@huanlin/dsh-plugin-interpreters": "^0.2.1",
+    "@huanlin/dsh-plugin-sleep": "^0.1.0",
+    "@huanlin/dsh-plugin-ya-workspace-sidebar": "^0.3.1",
+    "@huanlin/dsh-plugin-yet-another-subagent": "^0.1.2"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@huanlin/dsh-plugin-sleep",
+        "@huanlin/dsh-plugin-ya-workspace-sidebar",
+        "@huanlin/dsh-plugin-interpreters",
+        "@huanlin/dsh-plugin-yet-another-subagent"
+      ]
+    }
+  }
+}

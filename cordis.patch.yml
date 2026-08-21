@@ -1,0 +1,22 @@
+# dsh-plugin-roundtable bundle patch: mounts the RoundTable plugin into the
+# host composition of a dsh profile. The plugin registers its
+# `roundtable_*` tools into the shared `tools` registry, one usage section
+# into the global system prompt, a data route on the web server, and the
+# "圆桌会议" conversation-view tab in the Web GUI.
+#
+# Install: `dsh plugin --profile <name> add <this package>`.
+- insert:
+    - id: roundtable
+      name: '@huanlin/dsh-plugin-roundtable'
+      config:
+        # Meeting state lives under `<session workspace>/.roundtable/<meetingId>/`
+        stateDir: .roundtable
+        # Provider used to spawn expert-node subagents ('spawn' or 'fork').
+        memberProvider: spawn
+        # Max expert nodes per meeting.
+        maxNodes: 8
+        # Default collaboration mode when a meeting is created:
+        # 'orchestrated' (主持人统筹) or 'egalitarian' (多模型平等).
+        defaultMode: orchestrated
+        # Expert-node subagent delegation depth cap.
+        memberMaxDepth: 1

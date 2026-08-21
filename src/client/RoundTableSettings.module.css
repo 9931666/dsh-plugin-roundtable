@@ -1,0 +1,82 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 560px;
+  padding: 8px 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.select,
+.input {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: #ffffff;
+  color: rgba(0, 0, 0, 0.85);
+  max-width: 260px;
+}
+
+.hint {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+  line-height: 1.6;
+}
+
+.warning {
+  font-size: 12px;
+  color: #a06b00;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(214, 158, 46, 0.12);
+  border: 1px solid rgba(214, 158, 46, 0.4);
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.saveButton {
+  font-size: 13px;
+  padding: 7px 18px;
+  border-radius: 8px;
+  border: none;
+  background: #4d6bfe;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.saveButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.saved {
+  font-size: 12px;
+  color: #10a37f;
+}
+
+.failed {
+  font-size: 12px;
+  color: #c62828;
+}
+
+.note {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+}

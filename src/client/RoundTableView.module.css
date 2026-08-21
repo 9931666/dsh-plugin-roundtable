@@ -1,0 +1,350 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.meetingName {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.round {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.budgetRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.budgetLabel {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.budgetBar {
+  width: 90px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.18);
+  overflow: hidden;
+}
+
+.budgetFill {
+  height: 100%;
+  border-radius: 999px;
+  background: #4d6bfe;
+}
+
+.budgetFillTokens {
+  height: 100%;
+  border-radius: 999px;
+  background: #10a37f;
+}
+
+.budgetValue {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.65);
+  font-variant-numeric: tabular-nums;
+}
+
+.decisionBanner {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(214, 158, 46, 0.12);
+  border: 1px solid rgba(214, 158, 46, 0.4);
+}
+
+.decisionTag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a06b00;
+  flex: none;
+}
+
+.decisionQuestion {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-height: 260px;
+  border-radius: 12px;
+  background: #fafafa;
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  overflow: hidden;
+}
+
+.edgeLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.edgeGroup {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.edgeForward {
+  stroke: rgba(90, 90, 90, 0.55);
+  stroke-width: 1.6;
+}
+
+.edgeBidirectional {
+  stroke: rgba(77, 107, 254, 0.75);
+  stroke-width: 1.8;
+}
+
+.edgeArrow {
+  fill: rgba(90, 90, 90, 0.75);
+}
+
+.dragLine {
+  stroke: #4d6bfe;
+  stroke-width: 1.6;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+
+.node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: #ffffff;
+  border: 1.5px solid rgba(120, 120, 120, 0.45);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  user-select: none;
+  z-index: 2;
+}
+
+.captainNode {
+  width: 96px;
+  height: 88px;
+  border-radius: 12px;
+  background: #202124;
+  border: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.captainNode .nodeLabel {
+  color: #e8eaed;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.aggregatorNode {
+  width: 74px;
+  height: 74px;
+  border-radius: 14px;
+  background: #f3f4f6;
+  border: 1.5px dashed rgba(120, 120, 120, 0.5);
+}
+
+.nodeLabel {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.85);
+  text-align: center;
+  line-height: 1.3;
+  max-width: 62px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeMeta {
+  font-size: 10px;
+  color: #10a37f;
+  min-height: 12px;
+}
+
+/* Breathing light: low-opacity pulse, pure CSS — zero tokens. */
+.breathing {
+  animation: roundtable-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes roundtable-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(77, 107, 254, 0.28), 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-color: rgba(77, 107, 254, 0.75);
+  }
+  50% {
+    box-shadow: 0 0 0 9px rgba(77, 107, 254, 0), 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-color: rgba(77, 107, 254, 0.45);
+  }
+}
+
+.plusHandle {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #4d6bfe;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+  cursor: crosshair;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 3;
+}
+
+.node:hover .plusHandle,
+.plusHandle:focus-visible {
+  opacity: 1;
+}
+
+.digest {
+  flex: none;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 10px;
+  background: #fdfdfd;
+  font-size: 12px;
+}
+
+.digest summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.digestBody {
+  margin: 0;
+  padding: 0 10px 10px;
+  max-height: 180px;
+  overflow: auto;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.contextMenu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 170px;
+  background: #ffffff;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.contextMenuTitle {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+  padding: 4px 10px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  margin-bottom: 4px;
+}
+
+.contextMenuItem,
+.contextMenuItemDanger {
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.contextMenuItem:hover {
+  background: rgba(77, 107, 254, 0.1);
+}
+
+.contextMenuItemDanger {
+  color: #c62828;
+}
+
+.contextMenuItemDanger:hover {
+  background: rgba(198, 40, 40, 0.08);
+}
+
+.emptyState {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.emptyHint {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.5);
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+.fetchFailed {
+  font-size: 11px;
+  color: #c62828;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .breathing {
+    animation: none;
+    border-color: rgba(77, 107, 254, 0.6);
+  }
+}
