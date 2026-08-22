@@ -8,27 +8,34 @@
 
 import type { MeetingUtterance } from './types.ts'
 
-const KEEP_PER_SPEAKER = 3
 const MAX_LENGTH = 4000
+const MAX_PER_UTTERANCE = 160
 
-/** Merge utterances into the gateway's structured digest. */
+/** Pull the "core output" / stance out of a formatted contribution, else compact the whole text. */
+function extractCore(text: string): string {
+  const core = text.match(/\[核心产出\]\s*([\s\S]*?)(?=\n\s*\[|$)/)?.[1]?.trim()
+  if (core) return core
+  const stance = text.match(/(?:立场|主张|观点|结论)[：:]\s*([\s\S]*?)(?=\n|$)/)?.[1]?.trim()
+  if (stance) return stance
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function compact(text: string, limit: number): string {
+  const single = text.replace(/\s+/g, ' ').trim()
+  return single.length > limit ? `${single.slice(0, limit)}…` : single
+}
+
+/** Merge utterances into a compact, chronological exchange (who → whom: core point). */
 export function aggregateUtterances(utterances: readonly MeetingUtterance[], maxLength = MAX_LENGTH): string {
-  const bySpeaker = new Map<string, MeetingUtterance[]>()
+  const lines: string[] = []
   for (const utterance of utterances) {
     if (utterance.kind !== 'speech' && utterance.kind !== 'proxy-thinking') continue
-    const list = bySpeaker.get(utterance.nodeKey) ?? []
-    list.push(utterance)
-    bySpeaker.set(utterance.nodeKey, list)
+    const from = utterance.nodeKey
+    const to = utterance.to ?? '网关'
+    const body = compact(extractCore(utterance.summary ?? utterance.content), MAX_PER_UTTERANCE)
+    lines.push(`[R${utterance.round}] ${from} → ${to}\n${body}`)
   }
-  const sections: string[] = []
-  for (const [speaker, items] of bySpeaker) {
-    const recent = items.slice(-KEEP_PER_SPEAKER)
-    const body = recent
-      .map((item) => `[R${item.round}] ${item.summary ?? item.content}`)
-      .join('\n---\n')
-    sections.push(`### ${speaker}\n${body}`)
-  }
-  const text = `[汇聚网关·结构化摘要]\n${sections.join('\n\n') || '（暂无发言）'}`
+  const text = `[汇聚网关·交锋摘要]\n${lines.join('\n\n') || '（暂无发言）'}`
   return text.length > maxLength ? `${text.slice(0, maxLength)}\n…(截断)` : text
 }
 

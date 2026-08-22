@@ -9,7 +9,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { listMeetings, readMeeting, readTranscript } from './state.ts'
 import { aggregateUtterances } from './aggregator.ts'
-import { ACTIVE_NODE_STATUSES } from './types.ts'
+import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
+import type { Meeting, MeetingUtterance } from './types.ts'
 
 /** One meeting snapshot for the Web UI. */
 export interface MeetingSnapshot {
@@ -47,6 +48,50 @@ export interface MeetingSnapshot {
     options: string[]
   }[]
   digest: string
+  messages: {
+    id: string
+    from: string
+    to: string
+    ts: number
+  }[]
+}
+
+/** Orchestrated meetings show an implicit star topology even before the
+ * captain wires explicit edges: captain ⇄ each node, each node → aggregator. */
+function synthesizedEdges(meeting: Meeting): MeetingSnapshot['edges'] {
+  if (meeting.edges.length > 0) {
+    return meeting.edges.map((edge) => ({
+      id: edge.id,
+      from: edge.from,
+      to: edge.to,
+      direction: edge.direction,
+    }))
+  }
+  if (meeting.mode !== 'orchestrated') return []
+  const out: MeetingSnapshot['edges'] = []
+  for (const node of meeting.nodes) {
+    if (node.status === 'removed') continue
+    out.push({ id: `synthetic:${CAPTAIN_KEY}:${node.key}`, from: CAPTAIN_KEY, to: node.key, direction: 'bidirectional' })
+    out.push({ id: `synthetic:${node.key}:${AGGREGATOR_KEY}`, from: node.key, to: AGGREGATOR_KEY, direction: 'forward' })
+  }
+  return out
+}
+
+/** Recent directed message pulses for the flow animation (newest first). */
+function recentDirectedMessages(utterances: readonly MeetingUtterance[]): MeetingSnapshot['messages'] {
+  const out: MeetingSnapshot['messages'] = []
+  for (let i = utterances.length - 1; i >= 0 && out.length < 8; i--) {
+    const utterance = utterances[i]
+    if (utterance === undefined) continue
+    if (utterance.kind !== 'speech' && utterance.kind !== 'proxy-thinking') continue
+    out.push({
+      id: utterance.id,
+      from: utterance.nodeKey,
+      to: utterance.to ?? AGGREGATOR_KEY,
+      ts: utterance.ts,
+    })
+  }
+  return out
 }
 
 /** Collect snapshots across state roots, optionally filtered by captain session. */
@@ -94,16 +139,12 @@ export async function collectMeetingSnapshots(
               activity,
             }
           }),
-        edges: meeting.edges.map((edge) => ({
-          id: edge.id,
-          from: edge.from,
-          to: edge.to,
-          direction: edge.direction,
-        })),
+        edges: synthesizedEdges(meeting),
         pendingDecisions: meeting.decisions
           .filter((decision) => decision.status === 'pending')
           .map((decision) => ({ id: decision.id, question: decision.question, options: decision.options })),
         digest: aggregateUtterances(utterances),
+        messages: recentDirectedMessages(utterances),
       })
     }
   }

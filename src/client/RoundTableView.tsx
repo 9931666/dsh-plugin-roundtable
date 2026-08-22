@@ -9,7 +9,7 @@
  * @module dsh-plugin-roundtable/client/RoundTableView
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
 import type { RpcCaller, WireEdge, WireMeeting } from './wire.ts'
 import { fetchMeetings } from './wire.ts'
@@ -42,17 +42,46 @@ interface DragState {
 
 const NODE_RADIUS = 34
 
+/** Provider → brand avatar (abbreviation + brand color), best-effort. */
+const PROVIDER_BRAND: Array<{ match: RegExp; abbr: string; color: string }> = [
+  { match: /deepseek/i, abbr: 'DS', color: '#4D6BFE' },
+  { match: /glm|zhipu|z\.ai|智谱/i, abbr: 'GLM', color: '#3859FF' },
+  { match: /openai|gpt/i, abbr: 'GPT', color: '#10A37F' },
+  { match: /anthropic|claude/i, abbr: 'CLD', color: '#D97757' },
+  { match: /qwen|通义/i, abbr: 'QW', color: '#6E56CF' },
+  { match: /moonshot|kimi/i, abbr: 'KM', color: '#16181D' },
+  { match: /gemini/i, abbr: 'GM', color: '#4285F4' },
+]
+
+function providerBrand(provider: string): { abbr: string; color: string } {
+  for (const brand of PROVIDER_BRAND) {
+    if (brand.match.test(provider)) return { abbr: brand.abbr, color: brand.color }
+  }
+  const abbr = provider.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '?'
+  return { abbr, color: '#8a8a8a' }
+}
+
+/** CSS custom properties driving one message pulse from `from` to `to`. */
+function flowStyle(from: Point, to: Point): CSSProperties {
+  return {
+    '--rt-fx': `${from.x}px`,
+    '--rt-fy': `${from.y}px`,
+    '--rt-tx': `${to.x}px`,
+    '--rt-ty': `${to.y}px`,
+  } as CSSProperties
+}
+
 /** Ring layout for one meeting inside a canvas of the given size. */
 function layoutPositions(size: { w: number; h: number }, meeting: WireMeeting): Map<string, Point> {
   const positions = new Map<string, Point>()
   const { w, h } = size
   if (w <= 0 || h <= 0) return positions
-  positions.set('captain', { x: Math.max(90, w * 0.09), y: h * 0.5 })
-  positions.set('aggregator', { x: w * 0.52, y: h * 0.64 })
+  positions.set('captain', { x: Math.max(64, w * 0.11), y: h * 0.5 })
+  positions.set('aggregator', { x: w * 0.47, y: h * 0.5 })
   const nodes = meeting.nodes
-  const centerX = w * 0.7
+  const centerX = w * 0.75
   const centerY = h * 0.5
-  const radius = Math.min(w * 0.24, h * 0.38)
+  const radius = Math.min(w * 0.19, h * 0.36)
   nodes.forEach((node, index) => {
     const angle = -Math.PI / 2 + (index / Math.max(1, nodes.length)) * Math.PI * 2
     positions.set(node.key, {
@@ -99,8 +128,12 @@ function arrowPoints(x: number, y: number, angle: number, size = 7): string {
 }
 
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
-  const { sessionId, rpc, t: translate } = props
+  const { rpc, t: translate } = props
+  // The `sessionId` prop is kept for slot-interface compatibility, but the
+  // tab queries ALL meetings in the workspace (no session filter): past
+  // meetings stay visible across session switches, updates and restarts.
   const [meetings, setMeetings] = useState<WireMeeting[]>([])
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -109,13 +142,13 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      const next = await fetchMeetings(String(sessionId))
+      const next = await fetchMeetings()
       setMeetings(next)
       setFetchFailed(false)
     } catch {
       setFetchFailed(true)
     }
-  }, [sessionId])
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -124,7 +157,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       if (inflight) return
       inflight = true
       try {
-        const next = await fetchMeetings(String(sessionId))
+        const next = await fetchMeetings()
         if (alive) {
           setMeetings(next)
           setFetchFailed(false)
@@ -141,7 +174,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       alive = false
       window.clearInterval(timer)
     }
-  }, [sessionId])
+  }, [])
 
   // Observe the canvas size.
   useEffect(() => {
@@ -191,12 +224,21 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }
   }, [drag, refresh, rpc])
 
-  const meeting = meetings[0]
+  // Selected meeting (kept stable while the polled list refreshes), falling
+  // back to the first meeting when the selection is missing or unset.
+  const meeting = meetings.find((candidate) => candidate.id === selectedId) ?? meetings[0]
 
   const positions = useMemo(
     () => meeting === undefined ? new Map<string, Point>() : layoutPositions(size, meeting),
     [meeting, size],
   )
+
+  // Recent messages (≤3s old) drive a one-shot flow pulse along their edge.
+  const activeMessages = useMemo(() => {
+    if (meeting === undefined) return []
+    const cutoff = Date.now() - 3000
+    return (meeting.messages ?? []).filter((message) => message.ts >= cutoff).slice(0, 4)
+  }, [meeting])
 
   const handleEdgeAction = useCallback((action: 'forward' | 'bidirectional' | 'remove'): void => {
     if (menu === null) return
@@ -232,6 +274,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     const from = positions.get(edge.from)
     const to = positions.get(edge.to)
     if (from === undefined || to === undefined) return null
+    const synthetic = edge.id.startsWith('synthetic:')
     const geo = edgeGeometry(from, to)
     const head = arrowPoints(geo.x2, geo.y2, geo.angle)
     const tail = edge.direction === 'bidirectional' ? arrowPoints(geo.x1, geo.y1, geo.angle + Math.PI) : null
@@ -240,6 +283,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         key={edge.id}
         className={styles.edgeGroup}
         onContextMenu={(event) => {
+          if (synthetic) return
           event.preventDefault()
           setMenu({ x: event.clientX, y: event.clientY, meetingId: meeting.id, edge })
         }}
@@ -249,10 +293,10 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           y1={geo.y1}
           x2={geo.x2}
           y2={geo.y2}
-          className={edge.direction === 'bidirectional' ? styles.edgeBidirectional : styles.edgeForward}
+          className={synthetic ? styles.edgeSynthetic : edge.direction === 'bidirectional' ? styles.edgeBidirectional : styles.edgeForward}
         />
-        <polygon points={head} className={styles.edgeArrow} />
-        {tail !== null ? <polygon points={tail} className={styles.edgeArrow} /> : null}
+        <polygon points={head} className={synthetic ? styles.edgeArrowSynthetic : styles.edgeArrow} />
+        {tail !== null ? <polygon points={tail} className={synthetic ? styles.edgeArrowSynthetic : styles.edgeArrow} /> : null}
       </g>
     )
   }
@@ -263,6 +307,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     const node = kind === 'node' ? meeting.nodes.find((candidate) => candidate.key === key) : undefined
     const breathing = kind === 'node' && node?.activity === 'running'
     const activityLabel = node === undefined ? '' : (node.activity === 'running' ? 'activityRunning' : node.activity === 'idle' ? 'activityIdle' : 'activityReady')
+    const brand = kind === 'node' && node !== undefined ? providerBrand(node.provider) : null
     return (
       <div
         key={key}
@@ -277,6 +322,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         style={{ left: point.x, top: point.y }}
         title={node === undefined ? label : `${label}${node.role !== '' ? ` · ${node.role}` : ''}`}
       >
+        {brand !== null ? (
+          <div className={styles.avatar} style={{ background: brand.color }}>
+            <span className={styles.avatarAbbr}>{brand.abbr}</span>
+          </div>
+        ) : null}
         <div className={styles.nodeLabel}>{label}</div>
         {kind === 'node' ? (
           <div className={styles.nodeMeta}>
@@ -305,6 +355,20 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       <div className={styles.header}>
         <div className={styles.titleRow}>
           <span className={styles.meetingName}>{meeting.name}</span>
+          {meetings.length > 1 ? (
+            <select
+              className={styles.meetingSelect}
+              value={meeting.id}
+              onChange={(event) => setSelectedId(event.target.value)}
+              aria-label={translate('meetingSelect')}
+            >
+              {meetings.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name} · {candidate.mode === 'egalitarian' ? translate('modeEgalitarian') : translate('modeOrchestrated')} · {candidate.status}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <span className={styles.badge}>{modeLabel}</span>
           <span className={styles.badge}>{meeting.status}</span>
           <span className={styles.round}>{translate('round')} {meeting.round}</span>
@@ -348,6 +412,12 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         {renderNode('captain', 'DeepSeek · 主持', 'captain')}
         {renderNode('aggregator', '汇聚网关', 'aggregator')}
         {meeting.nodes.map((node) => renderNode(node.key, node.key, 'node'))}
+        {activeMessages.map((message) => {
+          const from = positions.get(message.from)
+          const to = positions.get(message.to)
+          if (from === undefined || to === undefined) return null
+          return <div key={message.id} className={styles.msgPulse} style={flowStyle(from, to)} />
+        })}
       </div>
       <details className={styles.digest}>
         <summary>{translate('gatewayDigest')}</summary>

@@ -35,6 +35,8 @@ export interface RoundTablePreferences {
 export interface RoundTableRuntime {
   scope: SettingsScope<RoundTablePreferences> | undefined
   stateDir: string
+  /** In-memory preferences used when the settings scope is not mounted. */
+  fallbackPrefs: RoundTablePreferences
 }
 
 const ENDPOINT_PREFIX = 'roundtable/'
@@ -87,8 +89,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
       async (endpoint, payload) => {
         switch (endpoint) {
           case 'roundtable/prefs.get': {
-            const prefs = runtime.scope?.get()
-            if (prefs === undefined) return fail('roundtable preferences are not mounted (settings service missing)')
+            const prefs = runtime.scope?.get() ?? runtime.fallbackPrefs
             return ok<RoundTablePreferences>({
               defaultMode: prefs.defaultMode,
               maxRounds: prefs.maxRounds,
@@ -100,7 +101,22 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             if (patch === undefined || typeof patch !== 'object' || patch === null) {
               return fail('payload must be a preferences patch object')
             }
-            if (runtime.scope === undefined) return fail('roundtable preferences are not mounted (settings service missing)')
+            if (runtime.scope === undefined) {
+              // Settings not mounted: keep an in-memory fallback so the settings
+              // page stays usable; persistence resumes on the next clean start.
+              const base = runtime.fallbackPrefs
+              const next: RoundTablePreferences = {
+                defaultMode: patch.defaultMode === 'orchestrated' || patch.defaultMode === 'egalitarian' ? patch.defaultMode : base.defaultMode,
+                maxRounds: typeof patch.maxRounds === 'number' && Number.isFinite(patch.maxRounds) && patch.maxRounds >= 1 ? Math.floor(patch.maxRounds) : base.maxRounds,
+                maxTokens: typeof patch.maxTokens === 'number' && Number.isFinite(patch.maxTokens) && patch.maxTokens >= 1000 ? Math.floor(patch.maxTokens) : base.maxTokens,
+              }
+              runtime.fallbackPrefs = next
+              return ok<RoundTablePreferences>({
+                defaultMode: next.defaultMode,
+                maxRounds: next.maxRounds,
+                maxTokens: next.maxTokens,
+              })
+            }
             await runtime.scope.update(patch as object)
             const next = runtime.scope.get()
             return ok<RoundTablePreferences>({

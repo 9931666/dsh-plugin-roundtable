@@ -39,6 +39,13 @@ export interface WirePendingDecision {
   options: string[]
 }
 
+export interface WireMessage {
+  id: string
+  from: string
+  to: string
+  ts: number
+}
+
 export interface WireMeeting {
   id: string
   name: string
@@ -52,6 +59,7 @@ export interface WireMeeting {
   edges: WireEdge[]
   pendingDecisions: WirePendingDecision[]
   digest: string
+  messages: WireMessage[]
 }
 
 export interface RoundTablePrefs {
@@ -60,9 +68,15 @@ export interface RoundTablePrefs {
   maxTokens: number
 }
 
-/** Poll the meeting snapshot for one captain session. */
-export async function fetchMeetings(sessionId: string): Promise<WireMeeting[]> {
-  const response = await fetch(`/plugins/dsh-plugin-roundtable/state?session=${encodeURIComponent(sessionId)}`, {
+/**
+ * Poll the meeting snapshot for this workspace. No session filter: the tab
+ * must keep showing past meetings even after the session changed (new
+ * session, plugin update, restart), because a meeting's captain session may
+ * no longer exist. The host route lists every meeting under every workspace
+ * when the `session` parameter is omitted.
+ */
+export async function fetchMeetings(): Promise<WireMeeting[]> {
+  const response = await fetch('/plugins/dsh-plugin-roundtable/state', {
     cache: 'no-store',
   })
   if (!response.ok) throw new Error(`roundtable state route returned ${response.status}`)

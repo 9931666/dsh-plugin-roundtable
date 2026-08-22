@@ -142,18 +142,29 @@ export function apply(ctx: Context, config: Config): void {
   // cordis.yml config is the composition base; the user layer wins. Settings
   // are consumed by the client settings page (via RPC) and by the tools'
   // defaults.
-  const runtime: RoundTableRuntime = { scope: undefined, stateDir: resolved.stateDir }
+  // Fallback preferences when the settings service is absent or the namespace
+  // registration fails (e.g. a HMR reload left the old registration behind).
+  // Defaults mirror PreferenceSchema / DEFAULT_MAX_ROUNDS / DEFAULT_MAX_TOKENS.
+  const runtime: RoundTableRuntime = {
+    scope: undefined,
+    stateDir: resolved.stateDir,
+    fallbackPrefs: { defaultMode: resolved.defaultMode, maxRounds: 10, maxTokens: 200_000 },
+  }
   ctx.inject(['settings'], (settingsCtx) => {
-    const scope = settingsCtx.settings.register(SETTINGS_NAMESPACE, PreferenceSchema, {
-      base: { defaultMode: resolved.defaultMode },
-    }) as unknown as RoundTableRuntime['scope']
-    runtime.scope = scope
-    scope?.watch((value) => {
-      const preference = value as { defaultMode?: 'orchestrated' | 'egalitarian' } | undefined
-      if (preference?.defaultMode === 'orchestrated' || preference?.defaultMode === 'egalitarian') {
-        resolved.defaultMode = preference.defaultMode
-      }
-    })
+    try {
+      const scope = settingsCtx.settings.register(SETTINGS_NAMESPACE, PreferenceSchema, {
+        base: { defaultMode: resolved.defaultMode },
+      }) as unknown as RoundTableRuntime['scope']
+      runtime.scope = scope
+      scope?.watch((value) => {
+        const preference = value as { defaultMode?: 'orchestrated' | 'egalitarian' } | undefined
+        if (preference?.defaultMode === 'orchestrated' || preference?.defaultMode === 'egalitarian') {
+          resolved.defaultMode = preference.defaultMode
+        }
+      })
+    } catch (error) {
+      settingsCtx.logger.warn('roundtable: settings namespace registration failed; preferences fall back to config defaults', error)
+    }
   })
 
   // Browser RPC: preferences + edge direction edits from the topology tab.

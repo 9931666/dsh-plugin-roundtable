@@ -41,6 +41,7 @@ export type RoundTableKey =
   | 'settingsLoadFailed'
   | 'settingsSaveFailed'
   | 'fetchFailed'
+  | 'meetingSelect'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -51,8 +52,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 export const zh: Record<RoundTableKey, string> = {
   tab: '圆桌会议',
-  empty: '当前会话还没有圆桌会议',
-  emptyHint: '回到聊天，说一句「开个圆桌会议讨论……」，主持人就会拉起一支专家队伍并出现在这里。',
+  empty: '当前工作区还没有圆桌会议',
+  emptyHint: '回到聊天，说一句「开个圆桌会议讨论……」，主持人就会拉起一支专家队伍并出现在这里。历史会议会一直保留在这个 Tab 里，随时可以切换查看。',
   meeting: '会议',
   mode: '协作模式',
   modeOrchestrated: '主持人统筹',
@@ -85,12 +86,13 @@ export const zh: Record<RoundTableKey, string> = {
   settingsLoadFailed: '读取设置失败',
   settingsSaveFailed: '保存设置失败',
   fetchFailed: '拉取会议状态失败，正在重试…',
+  meetingSelect: '切换会议',
 }
 
 export const en: Record<RoundTableKey, string> = {
   tab: 'RoundTable',
-  empty: 'No round-table meeting in this session yet',
-  emptyHint: 'Go back to chat and say "start a round-table meeting to discuss…" — the captain will assemble a team of experts right here.',
+  empty: 'No round-table meeting in this workspace yet',
+  emptyHint: 'Go back to chat and say "start a round-table meeting to discuss…" — the captain will assemble a team of experts right here. Past meetings stay in this tab and can be switched back to anytime.',
   meeting: 'Meeting',
   mode: 'Mode',
   modeOrchestrated: 'Orchestrated',
@@ -123,4 +125,5 @@ export const en: Record<RoundTableKey, string> = {
   settingsLoadFailed: 'Failed to load preferences',
   settingsSaveFailed: 'Failed to save preferences',
   fetchFailed: 'Failed to fetch meeting state, retrying…',
+  meetingSelect: 'Switch meeting',
 }
