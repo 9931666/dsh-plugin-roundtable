@@ -30,6 +30,7 @@ export type RoundTableKey =
   | 'activityRunning'
   | 'activityIdle'
   | 'activityReady'
+  | 'activityRemoved'
   | 'nodeRole'
   | 'settingsNav'
   | 'settingsDefaultMode'
@@ -89,6 +90,7 @@ export const zh: Record<RoundTableKey, string> = {
   activityRunning: '工作中',
   activityIdle: '空闲',
   activityReady: '待唤醒',
+  activityRemoved: '已退出',
   nodeRole: '角色',
   settingsNav: '圆桌会议',
   settingsDefaultMode: '默认协作模式',
@@ -142,6 +144,7 @@ export const en: Record<RoundTableKey, string> = {
   activityRunning: 'working',
   activityIdle: 'idle',
   activityReady: 'ready',
+  activityRemoved: 'removed',
   nodeRole: 'Role',
   settingsNav: 'RoundTable',
   settingsDefaultMode: 'Default collaboration mode',

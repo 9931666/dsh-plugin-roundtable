@@ -6,7 +6,14 @@
  *   - `roundtable/edge.add`    → drag-to-connect a new channel
  *   - `roundtable/edge.remove` → remove an edge
  *
- * Registered on the host's `/api` channel through `ctx.inject(['connection'])`.
+ * Registered on the host through `ctx.inject(['connection'])` on the plugin's
+ * OWN RPC channel `/roundtable` (NOT the shared `/api` one). The `/api`
+ * channel is a single-interceptor shared channel owned by dsh-api-gateway, so
+ * registering a second `intercept('/api')` here throws
+ * "shared RPC channel /api already has an interceptor" and silently drops
+ * every roundtable RPC — which is exactly why drag-to-connect looked dead for
+ * both removed AND active nodes. Using `rpc.handle('/roundtable', ...)` gives
+ * this plugin its own prefix-routed channel, mirroring the ya-subagent plugin.
  * @module dsh-plugin-roundtable/rpc
  */
 
@@ -54,14 +61,13 @@ function fail<T>(message: string): RpcResult<T> {
   return { ok: false, error: { code: 'internal', message } }
 }
 
-/** Connection service slice used by the interceptor. */
+/** Connection service slice used to register this plugin's own RPC channel. */
 interface RpcConnection {
   readonly rpc: {
-    readonly intercept: (
-      channel: '/api',
-      matches: (endpoint: string) => boolean,
+    readonly handle: (
+      channel: string,
       handler: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult<unknown>>,
-      options: { readonly authority: 'trusted-host' | 'loopback' },
+      options?: { readonly authority: 'trusted-host' | 'loopback' },
     ) => unknown
   }
 }
@@ -79,13 +85,12 @@ async function withEdgeLock<T>(
   return withMeetingLock(`meeting:${stateRoot}:${meetingId}`, () => operation(stateRoot))
 }
 
-/** Register the RoundTable RPC interceptor on the host's `/api` channel. */
+/** Register the RoundTable RPC handler on the plugin's own channel. */
 export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
   ctx.inject(['connection'], (connectionCtx) => {
     const connection = connectionCtx.connection as unknown as RpcConnection
-    connection.rpc.intercept(
-      '/api',
-      ownsEndpoint,
+    connection.rpc.handle(
+      '/roundtable',
       async (endpoint, payload) => {
         switch (endpoint) {
           case 'roundtable/prefs.get': {
@@ -190,7 +195,11 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             return fail(`unknown endpoint: ${endpoint}`)
         }
       },
-      { authority: 'trusted-host' },
+      // Channel trust policy is REQUIRED — omitting it makes the host
+      // registration throw ("options.authority" read on undefined), the
+      // channel never mounts, and every browser RPC fails with
+      // "无法连接会议服务". Mirrors the ya-subagent plugin's usage.
+      { authority: 'trusted-host' as const },
     )
   })
 }

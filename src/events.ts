@@ -58,15 +58,25 @@ interface SessionAppender {
   append: (type: string, data: unknown) => void
 }
 
-/** Append one meeting event into the captain's session (best effort). */
+/**
+ * Append one meeting event into the captain's session (best effort).
+ *
+ * NOTE (persistence contract): this harness's session-read path refuses to
+ * interpret a log containing an event type outside its fixed
+ * `KNOWN_SESSION_EVENT_TYPES` vocabulary unless the envelope carries the
+ * `ignorable` marker. Out-of-repo plugin events such as `roundtable/*` are
+ * outside that list by construction, and `Session.append` exposes no way to
+ * set `ignorable`. Writing them therefore made a captain's history
+ * unloadable ("unknown to this harness … not marked ignorable"). Meeting
+ * state is already the durable truth source (`<stateDir>/<meetingId>`), so
+ * these session events are deliberately no-ops: keeping the audit in the
+ * state files instead of the session log preserves history compatibility
+ * while losing nothing.
+ */
 export function appendMeetingEvent(
-  captain: Pick<Agent, 'session'>,
-  type: RoundTableEventName,
-  data: unknown,
+  _captain: Pick<Agent, 'session'>,
+  _type: RoundTableEventName,
+  _data: unknown,
 ): void {
-  try {
-    ;(captain.session as unknown as SessionAppender).append(type, data)
-  } catch {
-    // Event logging is best effort; state files remain the truth source.
-  }
+  // Deliberate no-op: see the persistence-contract note above.
 }

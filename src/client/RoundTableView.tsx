@@ -42,6 +42,7 @@ interface EdgeMenuState {
 
 interface DragState {
   from: string
+  meetingId: string
   x: number
   y: number
 }
@@ -80,8 +81,14 @@ function flowStyle(from: Point, to: Point): CSSProperties {
 /** Ring layout for one meeting inside a canvas of the given size. */
 function layoutPositions(size: { w: number; h: number }, meeting: WireMeeting): Map<string, Point> {
   const positions = new Map<string, Point>()
-  const { w, h } = size
-  if (w <= 0 || h <= 0) return positions
+  // Fall back to a sane canvas when the host container has not measured yet
+  // (flex under a still-unsized slot reports 0 box). Without this, the ring
+  // is empty on first paint and stays blank until a resize tick arrives —
+  // the classic "topology is a big empty box" bug. A fixed default means the
+  // nodes always have coordinates and the real size corrects them on the
+  // next measure, mirroring the subagent-tree view which never goes blank.
+  const w = size.w > 0 ? size.w : 900
+  const h = size.h > 0 ? size.h : 480
   positions.set('captain', { x: Math.max(64, w * 0.11), y: h * 0.5 })
   positions.set('aggregator', { x: w * 0.47, y: h * 0.5 })
   const nodes = meeting.nodes
@@ -134,6 +141,7 @@ function arrowPoints(x: number, y: number, angle: number, size = 7): string {
 }
 
 function nodeStatusLabel(node: WireNode, translate: (key: string) => string): string {
+  if (node.status === 'removed' || node.activity === 'removed') return translate('activityRemoved')
   if (node.activity === 'running') return translate('activityRunning')
   if (node.activity === 'idle') return translate('activityIdle')
   return translate('activityReady')
@@ -151,6 +159,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -230,31 +239,12 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     return () => window.removeEventListener('click', close)
   }, [hint])
 
-  // Drag-to-connect: follow the pointer and drop on a target node.
+  // Auto-dismiss the connect-result toast after a short beat.
   useEffect(() => {
-    if (drag === null) return
-    const move = (event: MouseEvent): void => {
-      setDrag((previous) => previous === null ? null : { ...previous, x: event.clientX, y: event.clientY })
-    }
-    const up = (event: MouseEvent): void => {
-      const target = (event.target as HTMLElement | null)?.closest?.('[data-rt-key]') as HTMLElement | null
-      const from = drag.from
-      setDrag(null)
-      if (target === null) return
-      const to = target.getAttribute('data-rt-key')
-      const meetingId = target.getAttribute('data-rt-meeting')
-      if (to === null || meetingId === null || to === from) return
-      void rpc<unknown>('roundtable/edge.add', { meetingId, from, to, direction: 'forward' })
-        .then(() => refresh())
-        .catch(() => undefined)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-    return () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-  }, [drag, refresh, rpc])
+    if (toast === null) return
+    const timer = window.setTimeout(() => setToast(null), 3000)
+    return () => window.clearTimeout(timer)
+  }, [toast])
 
   // Selected meeting (kept stable while the polled list refreshes), falling
   // back to the first meeting when the selection is missing or unset.
@@ -264,6 +254,62 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     () => meeting === undefined ? new Map<string, Point>() : layoutPositions(size, meeting),
     [meeting, size],
   )
+
+  // Drag-to-connect: follow the pointer and drop on a target node. All drag
+  // coordinates are canvas-relative (node positions are canvas-relative too),
+  // so the free end tracks the cursor exactly instead of drifting to a
+  // self-chosen endpoint.
+  //
+  // Drop targeting is COORDINATE-based: we pick the nearest node position to
+  // the release point (within a radius). This is robust against the cursor
+  // landing on an edge path or port dot — DOM closest()/elementFromPoint can
+  // miss the node under a line, which is exactly why user↔pm wiring failed
+  // silently before. Coordinate hit-testing cannot be blocked by a line.
+  useEffect(() => {
+    if (drag === null) return
+    const move = (event: MouseEvent): void => {
+      const rect = containerRef.current?.getBoundingClientRect()
+      const x = rect === undefined ? event.clientX : event.clientX - rect.left
+      const y = rect === undefined ? event.clientY : event.clientY - rect.top
+      setDrag((previous) => previous === null ? null : { ...previous, x, y })
+    }
+    const up = (event: MouseEvent): void => {
+      const from = drag.from
+      const meetingId = drag.meetingId
+      const x = drag.x
+      const y = drag.y
+      setDrag(null)
+      // Find the nearest node to the release point within a generous radius.
+      let bestKey: string | null = null
+      let bestDist = Number.POSITIVE_INFINITY
+      const hitRadius = 70
+      for (const [key, point] of positions) {
+        const dist = Math.hypot(point.x - x, point.y - y)
+        if (dist < bestDist) {
+          bestDist = dist
+          bestKey = key
+        }
+      }
+      const to = bestKey
+      if (to === null || to === from || bestDist > hitRadius) return
+      void rpc<unknown>('roundtable/edge.add', { meetingId, from, to, direction: 'forward' })
+        .then((result) => {
+          if (result.ok) {
+            setToast({ kind: 'ok', text: `已连接 ${from} → ${to}` })
+            void refresh()
+          } else {
+            setToast({ kind: 'err', text: result.error?.message ?? '连线失败' })
+          }
+        })
+        .catch(() => setToast({ kind: 'err', text: '连线失败：无法连接会议服务' }))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+  }, [drag, refresh, rpc, positions])
 
   // Recent messages (≤3s old) drive a one-shot flow pulse along their edge.
   const activeMessages = useMemo(() => {
@@ -322,9 +368,67 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     const to = positions.get(edge.to)
     if (from === undefined || to === undefined) return null
     const synthetic = edge.id.startsWith('synthetic:')
-    const geo = edgeGeometry(from, to)
-    const head = arrowPoints(geo.x2, geo.y2, geo.angle)
-    const tail = edge.direction === 'bidirectional' ? arrowPoints(geo.x1, geo.y1, geo.angle + Math.PI) : null
+
+    // Bundle edges by shared origin so a hub's outgoing wires fan out like
+    // ribs from the same rim point instead of stabbing every direction; this
+    // is the "start from one anchor, split toward many ends" look. We offset
+    // each edge's start tangent by its index within the origin's bundle.
+    const fromDegree = meeting.edges.reduce((n, e) => n + (e.from === edge.from ? 1 : 0), 0)
+    const fromIndex = meeting.edges.filter((e) => e.from === edge.from).findIndex((e) => e.id === edge.id)
+    const toDegree = meeting.edges.reduce((n, e) => n + (e.to === edge.to ? 1 : 0), 0)
+    const toIndex = meeting.edges.filter((e) => e.to === edge.to).findIndex((e) => e.id === edge.id)
+
+    // Directional unit vector source -> target.
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const len = Math.max(1, Math.hypot(dx, dy))
+    const ux = dx / len
+    const uy = dy / len
+    // Start tangent: base direction plus a per-index fan offset (radians).
+    // For the big hubs (captain/aggregator) we COLLAPSE the outlet into a
+    // narrow band pointed toward the target instead of fanning all around the
+    // node — that is the "one bus, splitting outward" look the cap wants, so
+    // five lines leave the captain as a clean radiated bundle rather than
+    // stabbing in five directions. Expert↔expert edges keep the small fan.
+    const hubFrom = edge.from === 'captain' || edge.from === 'aggregator'
+    const hubTo = edge.to === 'captain' || edge.to === 'aggregator'
+    const startAngle = Math.atan2(uy, ux)
+      + (hubFrom ? (fromIndex - (fromDegree - 1) / 2) * 0.09 : fromDegree > 1 ? (fromIndex - (fromDegree - 1) / 2) * 0.16 : 0)
+    const endAngle = Math.atan2(uy, ux)
+      + (hubTo ? (toIndex - (toDegree - 1) / 2) * 0.09 : toDegree > 1 ? (toIndex - (toDegree - 1) / 2) * 0.16 : 0)
+
+    // Pull the two anchors back to the node rim (NODE_RADIUS).
+    const x1 = from.x + Math.cos(startAngle) * NODE_RADIUS
+    const y1 = from.y + Math.sin(startAngle) * NODE_RADIUS
+    const x2 = to.x + Math.cos(endAngle) * NODE_RADIUS
+    const y2 = to.y + Math.sin(endAngle) * NODE_RADIUS
+
+    const head = arrowPoints(x2, y2, endAngle)
+    const tail = edge.direction === 'bidirectional' ? arrowPoints(x1, y1, startAngle + Math.PI) : null
+
+    // Quadratic bezier with a larger bow so the mid-point clears other nodes,
+    // reducing the "line hidden behind a node" clutter.
+    const midX = (x1 + x2) / 2
+    const midY = (y1 + y2) / 2
+    const nx = -(y2 - y1)
+    const ny = x2 - x1
+    const nlen = Math.max(1, Math.hypot(nx, ny))
+    const bow = synthetic ? 0.2 : 0.24
+    const cx = midX + (nx / nlen) * nlen * bow
+    const cy = midY + (ny / nlen) * nlen * bow
+    const path = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`
+
+    // Role-based coloring: captain-outbound wires use a warm accent so the
+    // captain reads as the single source "all lines come from here" (a bus),
+    // aggregator wires a cool accent, and expert↔expert wires stay neutral.
+    const involvesCaptain = edge.from === 'captain' || edge.to === 'captain'
+    const involvesAggregator = edge.from === 'aggregator' || edge.to === 'aggregator'
+    const roleClass = synthetic
+      ? (involvesCaptain ? styles.edgeSyntheticCaptain : involvesAggregator ? styles.edgeSyntheticAggregator : styles.edgeSynthetic)
+      : (involvesCaptain ? styles.edgeCaptain : involvesAggregator ? styles.edgeAggregator : edge.direction === 'bidirectional' ? styles.edgeBidirectional : styles.edgeForward)
+    const arrowClass = synthetic
+      ? (involvesCaptain ? styles.edgeArrowSyntheticCaptain : involvesAggregator ? styles.edgeArrowSyntheticAggregator : styles.edgeArrowSynthetic)
+      : (involvesCaptain ? styles.edgeArrowCaptain : involvesAggregator ? styles.edgeArrowAggregator : styles.edgeArrow)
     return (
       <g
         key={edge.id}
@@ -335,15 +439,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           setMenu({ x: event.clientX, y: event.clientY, meetingId: meeting.id, edge })
         }}
       >
-        <line
-          x1={geo.x1}
-          y1={geo.y1}
-          x2={geo.x2}
-          y2={geo.y2}
-          className={synthetic ? styles.edgeSynthetic : edge.direction === 'bidirectional' ? styles.edgeBidirectional : styles.edgeForward}
-        />
-        <polygon points={head} className={synthetic ? styles.edgeArrowSynthetic : styles.edgeArrow} />
-        {tail !== null ? <polygon points={tail} className={synthetic ? styles.edgeArrowSynthetic : styles.edgeArrow} /> : null}
+        <path d={path} fill="none" className={roleClass} />
+        <polygon points={head} className={arrowClass} />
+        {tail !== null ? <polygon points={tail} className={arrowClass} /> : null}
       </g>
     )
   }
@@ -352,8 +450,20 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     const point = positions.get(key)
     if (point === undefined) return null
     const node = kind === 'node' ? meeting.nodes.find((candidate) => candidate.key === key) : undefined
-    const breathing = kind === 'node' && node?.activity === 'running'
+    const removed = kind === 'node' && (node?.status === 'removed' || node?.activity === 'removed')
+    const breathing = kind === 'node' && !removed && node?.activity === 'running'
     const brand = kind === 'node' && node !== undefined ? providerBrand(node.provider) : null
+    // Convert a screen-space pointer to canvas-relative coordinates. The
+    // topology canvas is absolutely-positioned inside the conversation slot, so
+    // `clientX/clientY` must be offset by the canvas bounding rect — otherwise
+    // the free end of a dragged connector flies off on its own instead of
+    // tracking the cursor. This is the bug that made "拉线终点不跟鼠标".
+    const startDrag = (clientX: number, clientY: number): void => {
+      const rect = containerRef.current?.getBoundingClientRect()
+      const x = rect === undefined ? clientX : clientX - rect.left
+      const y = rect === undefined ? clientY : clientY - rect.top
+      setDrag({ from: key, meetingId: meeting.id, x, y })
+    }
     return (
       <div
         key={key}
@@ -363,6 +473,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           styles.node,
           kind === 'captain' ? styles.captainNode : '',
           kind === 'aggregator' ? styles.aggregatorNode : '',
+          removed ? styles.nodeRemoved : '',
           breathing ? styles.breathing : '',
         ].filter(Boolean).join(' ')}
         style={{ left: point.x, top: point.y }}
@@ -379,19 +490,24 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             {node?.activity === 'running' ? translate('activityRunning') : ''}
           </div>
         ) : null}
-        <div
-          className={styles.plusHandle}
-          role="button"
-          tabIndex={0}
-          aria-label="connect"
-          onMouseDown={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            setDrag({ from: key, x: event.clientX, y: event.clientY })
-          }}
-        >
-          +
-        </div>
+        {/* Connection ports: a small hit-dot on each side of the node, like a
+            Dify workflow port. Drag from one to wire a directed edge. The dots
+            sit on the node rim so the wire visibly "grows out of" the expert. */}
+        {(['n', 'e', 's', 'w'] as const).map((dir) => (
+          <div
+            key={dir}
+            className={`${styles.port} ${styles[`port${dir.toUpperCase()}`]}`}
+            role="button"
+            tabIndex={0}
+            aria-label="connect"
+            data-port-dir={dir}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              startDrag(event.clientX, event.clientY)
+            }}
+          />
+        ))}
       </div>
     )
   }
@@ -444,15 +560,24 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             </div>
           ) : null}
         </div>
-        <div ref={containerRef} className={styles.canvas}>
-          <svg className={styles.edgeLayer} width={size.w} height={size.h}>
+        <div ref={containerRef} className={[styles.canvas, drag !== null ? styles.canvasDragging : ''].filter(Boolean).join(' ')}>
+          <svg className={styles.edgeLayer} width={size.w > 0 ? size.w : 900} height={size.h > 0 ? size.h : 480}>
             {meeting.edges.map(renderEdge)}
             {drag !== null && positions.get(drag.from) !== undefined ? (
               (() => {
                 const start = positions.get(drag.from)
                 if (start === undefined) return null
                 const end = { x: drag.x, y: drag.y }
-                return <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} className={styles.dragLine} />
+                const midX = (start.x + end.x) / 2
+                const midY = (start.y + end.y) / 2
+                const nx = -(end.y - start.y)
+                const ny = end.x - start.x
+                const len = Math.max(1, Math.hypot(nx, ny))
+                const bow = 0.14
+                const cx = midX + (nx / len) * len * bow
+                const cy = midY + (ny / len) * len * bow
+                const d = `M ${start.x} ${start.y} Q ${cx} ${cy} ${end.x} ${end.y}`
+                return <path d={d} fill="none" className={styles.dragLine} />
               })()
             ) : null}
           </svg>
@@ -465,6 +590,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             if (from === undefined || to === undefined) return null
             return <div key={message.id} className={styles.msgPulse} style={flowStyle(from, to)} />
           })}
+          {toast !== null ? (
+            <div className={styles.toast}>
+              <span className={toast.kind === 'ok' ? styles.toastOk : styles.toastErr}>{toast.text}</span>
+            </div>
+          ) : null}
         </div>
         <details className={styles.digest}>
           <summary>{translate('gatewayDigest')}</summary>
@@ -489,8 +619,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           <div className={styles.panelBody}>
             {meeting.nodes.map((node) => {
               const brand = providerBrand(node.provider)
+              const removed = node.status === 'removed' || node.activity === 'removed'
               return (
-                <div className={styles.agentRow} key={node.key}>
+                <div className={[styles.agentRow, removed ? styles.agentRowRemoved : ''].filter(Boolean).join(' ')} key={node.key}>
                   <div className={styles.agentAvatar} style={{ background: brand.color }}>
                     <span className={styles.agentAbbr}>{brand.abbr}</span>
                   </div>
@@ -498,7 +629,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                     <div className={styles.agentName}>{node.key}</div>
                     <div className={styles.agentRole}>{node.role}</div>
                   </div>
-                  <span className={node.activity === 'running' ? styles.agentStatusWorking : styles.agentStatus}>
+                  <span className={node.activity === 'running' ? styles.agentStatusWorking : removed ? styles.agentStatusRemoved : styles.agentStatus}>
                     {nodeStatusLabel(node, translate)}
                   </span>
                 </div>

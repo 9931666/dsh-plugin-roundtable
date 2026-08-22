@@ -168,6 +168,47 @@
   fill: rgba(90, 90, 90, 0.38);
 }
 
+/* Role-based accents so the topology reads at a glance: captain is the single
+   "everything radiates from here" hub (warm gold), aggregator is the sink
+   (cool teal), and expert↔expert wires stay neutral grey. */
+.edgeCaptain {
+  stroke: rgba(214, 158, 46, 0.85);
+  stroke-width: 1.8;
+}
+
+.edgeAggregator {
+  stroke: rgba(16, 163, 127, 0.8);
+  stroke-width: 1.6;
+}
+
+.edgeSyntheticCaptain {
+  stroke: rgba(214, 158, 46, 0.45);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 4;
+}
+
+.edgeSyntheticAggregator {
+  stroke: rgba(16, 163, 127, 0.4);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 4;
+}
+
+.edgeArrowCaptain {
+  fill: rgba(214, 158, 46, 0.9);
+}
+
+.edgeArrowAggregator {
+  fill: rgba(16, 163, 127, 0.85);
+}
+
+.edgeArrowSyntheticCaptain {
+  fill: rgba(214, 158, 46, 0.5);
+}
+
+.edgeArrowSyntheticAggregator {
+  fill: rgba(16, 163, 127, 0.45);
+}
+
 .dragLine {
   stroke: #4d6bfe;
   stroke-width: 1.6;
@@ -255,6 +296,18 @@
   white-space: nowrap;
 }
 
+/* Captain/aggregator labels are longer ("DeepSeek · 主持", "汇聚网关") and are
+   clipped into "DeepSee…" by the 62px default. Give them room to wrap to two
+   lines so the full name shows — the truncation was hiding the final "K" and
+   broke the reading of the host's name. */
+.captainNode .nodeLabel,
+.aggregatorNode .nodeLabel {
+  max-width: 86px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
 .avatar {
   width: 30px;
   height: 30px;
@@ -280,6 +333,25 @@
   min-height: 12px;
 }
 
+/* A node that was added then removed: keep it visible so the topology still
+   shows which models participated, but degrade it (greyed, no pulse, muted). */
+.nodeRemoved {
+  background: #f4f4f4;
+  border-color: rgba(128, 128, 128, 0.35);
+  box-shadow: none;
+  opacity: 0.72;
+}
+
+.nodeRemoved .nodeLabel {
+  color: rgba(0, 0, 0, 0.5);
+  text-decoration: line-through;
+}
+
+.nodeRemoved .avatar {
+  filter: grayscale(0.8);
+  opacity: 0.85;
+}
+
 /* Breathing light: low-opacity pulse, pure CSS — zero tokens. */
 .breathing {
   animation: roundtable-pulse 1.6s ease-in-out infinite;
@@ -296,27 +368,55 @@
   }
 }
 
-.plusHandle {
+/* Connector ports: small hit-dots on the node rim that a connector grows out
+   of (a Dify-style workflow port). Four per node; each is a 10px circle that
+   brightens on hover to signal "drag from here to wire an edge". The dots sit
+   outside the node circle so the wire visibly starts at the expert's edge. */
+.port {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 18px;
-  height: 18px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
-  background: #4d6bfe;
-  color: #ffffff;
-  font-size: 13px;
-  line-height: 18px;
-  text-align: center;
+  background: #ffffff;
+  border: 2px solid #4d6bfe;
+  box-shadow: 0 0 0 2px rgba(77, 107, 254, 0.15);
   cursor: crosshair;
   opacity: 0;
-  transition: opacity 120ms ease;
-  z-index: 3;
+  transition: opacity 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  z-index: 4;
 }
 
-.node:hover .plusHandle,
-.plusHandle:focus-visible {
+.node:hover .port,
+.port:focus-visible {
   opacity: 1;
+}
+
+.port:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 4px rgba(77, 107, 254, 0.28);
+  background: #4d6bfe;
+}
+
+/* Placement: centered on each rim, slightly outside the 68px circle. */
+.portN { top: -7px; left: calc(50% - 5.5px); }
+.portE { right: -7px; top: calc(50% - 5.5px); }
+.portS { bottom: -7px; left: calc(50% - 5.5px); }
+.portW { left: -7px; top: calc(50% - 5.5px); }
+
+/* Larger captain/aggregator rims need the ports pushed a touch further out. */
+.captainNode .portN { top: -9px; }
+.captainNode .portS { bottom: -9px; }
+.captainNode .portE { right: -9px; }
+.captainNode .portW { left: -9px; }
+.aggregatorNode .portN { top: -8px; }
+.aggregatorNode .portS { bottom: -8px; }
+.aggregatorNode .portE { right: -8px; }
+.aggregatorNode .portW { left: -8px; }
+
+/* While a connector is being dragged, keep every port visible so the user can
+   see exactly where they may drop — ports otherwise only appear on hover. */
+.canvasDragging .port {
+  opacity: 0.6;
 }
 
 /* ---------- gateway digest ---------- */
@@ -463,6 +563,27 @@
   color: #10a37f;
   flex: none;
   font-weight: 600;
+}
+
+.agentRowRemoved {
+  opacity: 0.6;
+}
+
+.agentRowRemoved .avatar,
+.agentRowRemoved .agentAvatar {
+  filter: grayscale(0.8);
+}
+
+.agentRowRemoved .agentName {
+  color: rgba(0, 0, 0, 0.5);
+  text-decoration: line-through;
+}
+
+.agentStatusRemoved {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.4);
+  font-style: italic;
+  flex: none;
 }
 
 .taskRow {
@@ -684,6 +805,44 @@
 .fetchFailed {
   font-size: 11px;
   color: #c62828;
+}
+
+/* Connect-result toast: a short-lived banner at the top of the topology
+   canvas telling the user whether a dragged wire landed. Without it a failed
+   edge.add (e.g. wiring a removed node) was silently swallowed — the user saw
+   nothing and assumed the drag did nothing. White card, black text, no tilt:
+   the label sits on a single centered baseline. */
+.toast {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: 90%;
+  background: #ffffff;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 8px;
+  padding: 8px 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.4;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.toastOk {
+  font-size: 12.5px;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+.toastErr {
+  font-size: 12.5px;
+  color: #b3261e;
+  font-weight: 500;
 }
 
 @media (prefers-reduced-motion: reduce) {

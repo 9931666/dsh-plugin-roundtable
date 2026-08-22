@@ -65,22 +65,32 @@ export interface MeetingSnapshot {
 }
 
 /** Orchestrated meetings show an implicit star topology even before the
- * captain wires explicit edges: captain ⇄ each node, each node → aggregator. */
+ * captain wires explicit edges: captain ⇄ each node, each node → aggregator.
+ *
+ * Real edges (the ones the user drags) are always included AND the synthetic
+ * skeleton is kept as a faded backdrop for any pair not explicitly wired, so
+ * dragging a new channel never makes the whole topology jump/vanish — the
+ * user sees their wire land on top of a stable skeleton instead of the
+ * skeleton disappearing the moment they add one edge.
+ */
 function synthesizedEdges(meeting: Meeting): MeetingSnapshot['edges'] {
-  if (meeting.edges.length > 0) {
-    return meeting.edges.map((edge) => ({
-      id: edge.id,
-      from: edge.from,
-      to: edge.to,
-      direction: edge.direction,
-    }))
-  }
-  if (meeting.mode !== 'orchestrated') return []
-  const out: MeetingSnapshot['edges'] = []
+  const real = meeting.edges.map((edge) => ({
+    id: edge.id,
+    from: edge.from,
+    to: edge.to,
+    direction: edge.direction,
+  }))
+  if (meeting.mode !== 'orchestrated') return real
+  const covered = new Set(real.flatMap((edge) => [`${edge.from}→${edge.to}`, `${edge.to}→${edge.from}`]))
+  const out: MeetingSnapshot['edges'] = [...real]
   for (const node of meeting.nodes) {
     if (node.status === 'removed') continue
-    out.push({ id: `synthetic:${CAPTAIN_KEY}:${node.key}`, from: CAPTAIN_KEY, to: node.key, direction: 'bidirectional' })
-    out.push({ id: `synthetic:${node.key}:${AGGREGATOR_KEY}`, from: node.key, to: AGGREGATOR_KEY, direction: 'forward' })
+    if (!covered.has(`${CAPTAIN_KEY}→${node.key}`)) {
+      out.push({ id: `synthetic:${CAPTAIN_KEY}:${node.key}`, from: CAPTAIN_KEY, to: node.key, direction: 'bidirectional' })
+    }
+    if (!covered.has(`${node.key}→${AGGREGATOR_KEY}`)) {
+      out.push({ id: `synthetic:${node.key}:${AGGREGATOR_KEY}`, from: node.key, to: AGGREGATOR_KEY, direction: 'forward' })
+    }
   }
   return out
 }
@@ -154,24 +164,28 @@ export async function collectMeetingSnapshots(
           usedRounds: meeting.budget.usedRounds,
           usedTokens: meeting.budget.usedTokens,
         },
-        nodes: meeting.nodes
-          .filter((node) => node.status !== 'removed')
-          .map((node) => {
-            let activity = 'unspawned'
-            if (node.id !== '' && ACTIVE_NODE_STATUSES.includes(node.status)) {
-              const live = ctx.agents.get(node.id as SessionId)
-              activity = live === undefined ? 'ready' : live.status
-            }
-            return {
-              id: node.id,
-              key: node.key,
-              role: node.role ?? '',
-              provider: node.provider ?? '',
-              model: node.model ?? '',
-              status: node.status,
-              activity,
-            }
-          }),
+        // Keep every node the meeting ever admitted, so the topology still
+        // shows models that were added then removed (e.g. an expert who left).
+        // A removed node renders degraded (status 'removed') instead of
+        // disappearing, which would hide which models actually participated.
+        nodes: meeting.nodes.map((node) => {
+          let activity = 'unspawned'
+          if (node.status === 'removed') {
+            activity = 'removed'
+          } else if (node.id !== '' && ACTIVE_NODE_STATUSES.includes(node.status)) {
+            const live = ctx.agents.get(node.id as SessionId)
+            activity = live === undefined ? 'ready' : live.status
+          }
+          return {
+            id: node.id,
+            key: node.key,
+            role: node.role ?? '',
+            provider: node.provider ?? '',
+            model: node.model ?? '',
+            status: node.status,
+            activity,
+          }
+        }),
         edges: synthesizedEdges(meeting),
         pendingDecisions: meeting.decisions
           .filter((decision) => decision.status === 'pending')

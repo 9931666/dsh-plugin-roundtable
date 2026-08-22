@@ -42,7 +42,12 @@ export function apply(ctx: ClientContext): void {
     if (connection === undefined) {
       return Promise.reject(new Error('roundtable: connection service unavailable'))
     }
-    return connection.rpc.call('/api', endpoint, payload) as unknown as Promise<RpcResult<T>>
+    // This plugin owns the `/roundtable` channel (its own prefix-routed RPC
+    // channel), NOT the shared `/api` channel — that one is a single
+    // interceptor owned by dsh-api-gateway, and claiming it here would throw
+    // and drop every roundtable call (the "cannot connect" drag-to-connect
+    // bug). Mirrors the ya-subagent plugin's own `/ya-subagent` channel.
+    return connection.rpc.call('/roundtable', endpoint, payload) as unknown as Promise<RpcResult<T>>
   }
 
   // ---- Topology tab (conversation.view) --------------------------------
