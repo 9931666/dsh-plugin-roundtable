@@ -54,6 +54,14 @@ export interface MeetingSnapshot {
     to: string
     ts: number
   }[]
+  recent: {
+    id: string
+    from: string
+    to: string
+    text: string
+    ts: number
+    round: number
+  }[]
 }
 
 /** Orchestrated meetings show an implicit star topology even before the
@@ -89,6 +97,31 @@ function recentDirectedMessages(utterances: readonly MeetingUtterance[]): Meetin
       from: utterance.nodeKey,
       to: utterance.to ?? AGGREGATOR_KEY,
       ts: utterance.ts,
+    })
+  }
+  return out
+}
+
+/** One-line compaction for the sidebar timeline. */
+function compactText(text: string, limit: number): string {
+  const single = text.replace(/\s+/g, ' ').trim()
+  return single.length > limit ? `${single.slice(0, limit)}…` : single
+}
+
+/** Recent contributions for the sidebar activity log (newest first). */
+function recentUtterances(utterances: readonly MeetingUtterance[]): MeetingSnapshot['recent'] {
+  const out: MeetingSnapshot['recent'] = []
+  for (let i = utterances.length - 1; i >= 0 && out.length < 20; i--) {
+    const utterance = utterances[i]
+    if (utterance === undefined) continue
+    if (utterance.kind !== 'speech' && utterance.kind !== 'proxy-thinking') continue
+    out.push({
+      id: utterance.id,
+      from: utterance.nodeKey,
+      to: utterance.to ?? AGGREGATOR_KEY,
+      text: compactText(utterance.summary ?? utterance.content, 90),
+      ts: utterance.ts,
+      round: utterance.round,
     })
   }
   return out
@@ -145,6 +178,7 @@ export async function collectMeetingSnapshots(
           .map((decision) => ({ id: decision.id, question: decision.question, options: decision.options })),
         digest: aggregateUtterances(utterances),
         messages: recentDirectedMessages(utterances),
+        recent: recentUtterances(utterances),
       })
     }
   }

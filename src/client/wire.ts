@@ -46,6 +46,15 @@ export interface WireMessage {
   ts: number
 }
 
+export interface WireUtterance {
+  id: string
+  from: string
+  to: string
+  text: string
+  ts: number
+  round: number
+}
+
 export interface WireMeeting {
   id: string
   name: string
@@ -60,6 +69,7 @@ export interface WireMeeting {
   pendingDecisions: WirePendingDecision[]
   digest: string
   messages: WireMessage[]
+  recent: WireUtterance[]
 }
 
 export interface RoundTablePrefs {

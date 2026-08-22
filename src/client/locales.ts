@@ -42,6 +42,14 @@ export type RoundTableKey =
   | 'settingsSaveFailed'
   | 'fetchFailed'
   | 'meetingSelect'
+  | 'agents'
+  | 'tasks'
+  | 'kb'
+  | 'activity'
+  | 'files'
+  | 'kbEmpty'
+  | 'filesEmpty'
+  | 'noActivity'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -87,6 +95,14 @@ export const zh: Record<RoundTableKey, string> = {
   settingsSaveFailed: '保存设置失败',
   fetchFailed: '拉取会议状态失败，正在重试…',
   meetingSelect: '切换会议',
+  agents: '专家',
+  tasks: '分工',
+  kb: '知识库',
+  activity: '发言记录',
+  files: '产出文件',
+  kbEmpty: '暂无参考资料（后续支持上传与检索）',
+  filesEmpty: '暂无文件产出',
+  noActivity: '（暂无发言）',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -126,4 +142,12 @@ export const en: Record<RoundTableKey, string> = {
   settingsSaveFailed: 'Failed to save preferences',
   fetchFailed: 'Failed to fetch meeting state, retrying…',
   meetingSelect: 'Switch meeting',
+  agents: 'Agents',
+  tasks: 'Tasks',
+  kb: 'Knowledge base',
+  activity: 'Activity',
+  files: 'Files',
+  kbEmpty: 'No reference materials yet (upload & search coming later)',
+  filesEmpty: 'No file outputs yet',
+  noActivity: '(no contributions yet)',
 }

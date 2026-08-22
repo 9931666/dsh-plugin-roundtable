@@ -1,17 +1,23 @@
 /**
  * RoundTable topology tab: the "圆桌会议" conversation view.
  *
- * Renders one meeting per captain session: the captain anchor on the left, a
- * ring of expert nodes on the right, the aggregation gateway in the middle,
- * and directed edges with arrows. Nodes breathe while working; edges have a
- * right-click menu (set forward/bidirectional, remove); dragging from a
- * node's "+" handle creates a new channel.
+ * Minimal two-column layout:
+ *   - main: meeting header (title/badges/budget) → topology canvas (captain
+ *     anchor, ring of expert nodes with brand avatars, directed edges) →
+ *     collapsible aggregation-gateway digest.
+ *   - sidebar: expert status list, role breakdown, knowledge-base skeleton,
+ *     recent-utterance activity log, and file outputs (none yet).
+ *
+ * The tab lists ALL meetings in the workspace (no session filter), so past
+ * meetings stay visible across session switches, plugin updates and restarts;
+ * a switcher dropdown is shown when more than one meeting exists.
+ *
  * @module dsh-plugin-roundtable/client/RoundTableView
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
-import type { RpcCaller, WireEdge, WireMeeting } from './wire.ts'
+import type { RpcCaller, WireEdge, WireMeeting, WireNode } from './wire.ts'
 import { fetchMeetings } from './wire.ts'
 import styles from './RoundTableView.module.css'
 
@@ -127,6 +133,12 @@ function arrowPoints(x: number, y: number, angle: number, size = 7): string {
   return `${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`
 }
 
+function nodeStatusLabel(node: WireNode, translate: (key: string) => string): string {
+  if (node.activity === 'running') return translate('activityRunning')
+  if (node.activity === 'idle') return translate('activityIdle')
+  return translate('activityReady')
+}
+
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const { rpc, t: translate } = props
   // The `sessionId` prop is kept for slot-interface compatibility, but the
@@ -150,6 +162,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }
   }, [])
 
+  // Poll the snapshot every second.
   useEffect(() => {
     let alive = true
     let inflight = false
@@ -176,16 +189,19 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }
   }, [])
 
-  // Observe the canvas size.
+  // Measure the canvas with a reliable fallback (offsetWidth/offsetHeight,
+  // read once on mount and on every resize). This keeps the topology visible
+  // even if the host container measures 0 height on first paint.
   useEffect(() => {
     const container = containerRef.current
     if (container === null) return
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry === undefined) return
-      const rect = entry.contentRect
-      setSize({ w: rect.width, h: rect.height })
-    })
+    const measure = (): void => {
+      const w = container.offsetWidth
+      const h = container.offsetHeight
+      setSize((previous) => (previous.w === w && previous.h === h ? previous : { w, h }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
     observer.observe(container)
     return () => observer.disconnect()
   }, [])
@@ -306,7 +322,6 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     if (point === undefined) return null
     const node = kind === 'node' ? meeting.nodes.find((candidate) => candidate.key === key) : undefined
     const breathing = kind === 'node' && node?.activity === 'running'
-    const activityLabel = node === undefined ? '' : (node.activity === 'running' ? 'activityRunning' : node.activity === 'idle' ? 'activityIdle' : 'activityReady')
     const brand = kind === 'node' && node !== undefined ? providerBrand(node.provider) : null
     return (
       <div
@@ -330,7 +345,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         <div className={styles.nodeLabel}>{label}</div>
         {kind === 'node' ? (
           <div className={styles.nodeMeta}>
-            {node?.activity === 'running' ? translate(activityLabel) : ''}
+            {node?.activity === 'running' ? translate('activityRunning') : ''}
           </div>
         ) : null}
         <div
@@ -352,77 +367,150 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
   return (
     <div className={styles.root}>
-      <div className={styles.header}>
-        <div className={styles.titleRow}>
-          <span className={styles.meetingName}>{meeting.name}</span>
-          {meetings.length > 1 ? (
-            <select
-              className={styles.meetingSelect}
-              value={meeting.id}
-              onChange={(event) => setSelectedId(event.target.value)}
-              aria-label={translate('meetingSelect')}
-            >
-              {meetings.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.name} · {candidate.mode === 'egalitarian' ? translate('modeEgalitarian') : translate('modeOrchestrated')} · {candidate.status}
-                </option>
+      <div className={styles.main}>
+        <div className={styles.header}>
+          <div className={styles.titleRow}>
+            <span className={styles.meetingName}>{meeting.name}</span>
+            {meetings.length > 1 ? (
+              <select
+                className={styles.meetingSelect}
+                value={meeting.id}
+                onChange={(event) => setSelectedId(event.target.value)}
+                aria-label={translate('meetingSelect')}
+              >
+                {meetings.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name} · {candidate.mode === 'egalitarian' ? translate('modeEgalitarian') : translate('modeOrchestrated')} · {candidate.status}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <span className={styles.badge}>{modeLabel}</span>
+            <span className={styles.badge}>{meeting.status}</span>
+            <span className={styles.round}>{translate('round')} {meeting.round}</span>
+          </div>
+          <div className={styles.budgetRow}>
+            <span className={styles.budgetLabel}>{translate('roundsBudget')}</span>
+            <div className={styles.budgetBar}>
+              <div className={styles.budgetFill} style={{ width: `${roundsPct}%` }} />
+            </div>
+            <span className={styles.budgetValue}>{meeting.budget.usedRounds}/{meeting.budget.maxRounds}</span>
+            <span className={styles.budgetLabel}>{translate('tokensBudget')}</span>
+            <div className={styles.budgetBar}>
+              <div className={styles.budgetFillTokens} style={{ width: `${tokensPct}%` }} />
+            </div>
+            <span className={styles.budgetValue}>{meeting.budget.usedTokens}/{meeting.budget.maxTokens}</span>
+          </div>
+          {meeting.pendingDecisions.length > 0 ? (
+            <div className={styles.decisionBanner}>
+              <span className={styles.decisionTag}>{translate('pendingDecision')}</span>
+              {meeting.pendingDecisions.map((decision) => (
+                <span key={decision.id} className={styles.decisionQuestion}>
+                  {decision.question}
+                  {decision.options.length > 0 ? `（${translate('pendingDecisionOptions')}：${decision.options.join(' / ')}）` : ''}
+                </span>
               ))}
-            </select>
+            </div>
           ) : null}
-          <span className={styles.badge}>{modeLabel}</span>
-          <span className={styles.badge}>{meeting.status}</span>
-          <span className={styles.round}>{translate('round')} {meeting.round}</span>
         </div>
-        <div className={styles.budgetRow}>
-          <span className={styles.budgetLabel}>{translate('roundsBudget')}</span>
-          <div className={styles.budgetBar}>
-            <div className={styles.budgetFill} style={{ width: `${roundsPct}%` }} />
-          </div>
-          <span className={styles.budgetValue}>{meeting.budget.usedRounds}/{meeting.budget.maxRounds}</span>
-          <span className={styles.budgetLabel}>{translate('tokensBudget')}</span>
-          <div className={styles.budgetBar}>
-            <div className={styles.budgetFillTokens} style={{ width: `${tokensPct}%` }} />
-          </div>
-          <span className={styles.budgetValue}>{meeting.budget.usedTokens}/{meeting.budget.maxTokens}</span>
+        <div ref={containerRef} className={styles.canvas}>
+          <svg className={styles.edgeLayer} width={size.w} height={size.h}>
+            {meeting.edges.map(renderEdge)}
+            {drag !== null && positions.get(drag.from) !== undefined ? (
+              (() => {
+                const start = positions.get(drag.from)
+                if (start === undefined) return null
+                const end = { x: drag.x, y: drag.y }
+                return <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} className={styles.dragLine} />
+              })()
+            ) : null}
+          </svg>
+          {renderNode('captain', 'DeepSeek · 主持', 'captain')}
+          {renderNode('aggregator', '汇聚网关', 'aggregator')}
+          {meeting.nodes.map((node) => renderNode(node.key, node.key, 'node'))}
+          {activeMessages.map((message) => {
+            const from = positions.get(message.from)
+            const to = positions.get(message.to)
+            if (from === undefined || to === undefined) return null
+            return <div key={message.id} className={styles.msgPulse} style={flowStyle(from, to)} />
+          })}
         </div>
-        {meeting.pendingDecisions.length > 0 ? (
-          <div className={styles.decisionBanner}>
-            <span className={styles.decisionTag}>{translate('pendingDecision')}</span>
-            {meeting.pendingDecisions.map((decision) => (
-              <span key={decision.id} className={styles.decisionQuestion}>
-                {decision.question}
-                {decision.options.length > 0 ? `（${translate('pendingDecisionOptions')}：${decision.options.join(' / ')}）` : ''}
-              </span>
+        <details className={styles.digest}>
+          <summary>{translate('gatewayDigest')}</summary>
+          <pre className={styles.digestBody}>{meeting.digest || translate('noDigest')}</pre>
+        </details>
+      </div>
+
+      <aside className={styles.sidebar}>
+        <section className={styles.panel}>
+          <div className={styles.panelTitle}>{translate('agents')}</div>
+          <div className={styles.panelBody}>
+            {meeting.nodes.map((node) => {
+              const brand = providerBrand(node.provider)
+              return (
+                <div className={styles.agentRow} key={node.key}>
+                  <div className={styles.agentAvatar} style={{ background: brand.color }}>
+                    <span className={styles.agentAbbr}>{brand.abbr}</span>
+                  </div>
+                  <div className={styles.agentInfo}>
+                    <div className={styles.agentName}>{node.key}</div>
+                    <div className={styles.agentRole}>{node.role}</div>
+                  </div>
+                  <span className={node.activity === 'running' ? styles.agentStatusWorking : styles.agentStatus}>
+                    {nodeStatusLabel(node, translate)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelTitle}>{translate('tasks')}</div>
+          <div className={styles.panelBody}>
+            {meeting.nodes.map((node) => (
+              <div className={styles.taskRow} key={node.key}>
+                <span className={styles.taskKey}>{node.key}</span>
+                <span className={styles.taskRole}>{node.role || '—'}</span>
+              </div>
             ))}
           </div>
-        ) : null}
-      </div>
-      <div ref={containerRef} className={styles.canvas}>
-        <svg className={styles.edgeLayer} width={size.w} height={size.h}>
-          {meeting.edges.map(renderEdge)}
-          {drag !== null && positions.get(drag.from) !== undefined ? (
-            (() => {
-              const start = positions.get(drag.from)
-              if (start === undefined) return null
-              const end = { x: drag.x, y: drag.y }
-              return <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} className={styles.dragLine} />
-            })()
-          ) : null}
-        </svg>
-        {renderNode('captain', 'DeepSeek · 主持', 'captain')}
-        {renderNode('aggregator', '汇聚网关', 'aggregator')}
-        {meeting.nodes.map((node) => renderNode(node.key, node.key, 'node'))}
-        {activeMessages.map((message) => {
-          const from = positions.get(message.from)
-          const to = positions.get(message.to)
-          if (from === undefined || to === undefined) return null
-          return <div key={message.id} className={styles.msgPulse} style={flowStyle(from, to)} />
-        })}
-      </div>
-      <details className={styles.digest}>
-        <summary>{translate('gatewayDigest')}</summary>
-        <pre className={styles.digestBody}>{meeting.digest || translate('noDigest')}</pre>
-      </details>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelTitle}>{translate('kb')}</div>
+          <div className={styles.panelBody}>
+            <div className={styles.panelEmpty}>{translate('kbEmpty')}</div>
+          </div>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelTitle}>{translate('activity')}</div>
+          <div className={styles.panelBody}>
+            {(meeting.recent ?? []).length === 0 ? (
+              <div className={styles.panelEmpty}>{translate('noActivity')}</div>
+            ) : (meeting.recent ?? []).map((utterance) => (
+              <div className={styles.logRow} key={utterance.id}>
+                <div className={styles.logHead}>
+                  <span className={styles.logFrom}>{utterance.from} → {utterance.to}</span>
+                  <span className={styles.logTime}>
+                    {new Date(utterance.ts).toLocaleTimeString('zh-CN', { hour12: false })}
+                  </span>
+                </div>
+                <div className={styles.logText}>{utterance.text}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelTitle}>{translate('files')}</div>
+          <div className={styles.panelBody}>
+            <div className={styles.panelEmpty}>{translate('filesEmpty')}</div>
+          </div>
+        </section>
+      </aside>
+
       {menu !== null ? (
         <div
           className={styles.contextMenu}
