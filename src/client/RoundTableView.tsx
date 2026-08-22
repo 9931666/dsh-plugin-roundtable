@@ -140,6 +140,53 @@ function arrowPoints(x: number, y: number, angle: number, size = 7): string {
   return `${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`
 }
 
+/** Quadratic-bezier geometry for one edge, shared by the renderer (which
+ *  draws the path) and the delete dot (which must sit on the curve's true
+ *  midpoint, i.e. the point at t=0.5 — not the control point). */
+function edgeCurveGeometry(
+  edge: WireEdge,
+  meeting: WireMeeting,
+  positions: Map<string, Point>,
+): { x1: number; y1: number; x2: number; y2: number; cx: number; cy: number; path: string; mx: number; my: number } | null {
+  const from = positions.get(edge.from)
+  const to = positions.get(edge.to)
+  if (from === undefined || to === undefined) return null
+  const synthetic = edge.id.startsWith('synthetic:')
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const len = Math.max(1, Math.hypot(dx, dy))
+  const ux = dx / len
+  const uy = dy / len
+  const fromDegree = meeting.edges.reduce((n, e) => n + (e.from === edge.from ? 1 : 0), 0)
+  const fromIndex = meeting.edges.filter((e) => e.from === edge.from).findIndex((e) => e.id === edge.id)
+  const toDegree = meeting.edges.reduce((n, e) => n + (e.to === edge.to ? 1 : 0), 0)
+  const toIndex = meeting.edges.filter((e) => e.to === edge.to).findIndex((e) => e.id === edge.id)
+  const hubFrom = edge.from === 'captain' || edge.from === 'aggregator'
+  const hubTo = edge.to === 'captain' || edge.to === 'aggregator'
+  const baseAngle = Math.atan2(uy, ux)
+  const startAngle = baseAngle
+    + (hubFrom ? (fromIndex - (fromDegree - 1) / 2) * 0.09 : fromDegree > 1 ? (fromIndex - (fromDegree - 1) / 2) * 0.16 : 0)
+  const endAngle = baseAngle
+    + (hubTo ? (toIndex - (toDegree - 1) / 2) * 0.09 : toDegree > 1 ? (toIndex - (toDegree - 1) / 2) * 0.16 : 0)
+  const x1 = from.x + Math.cos(startAngle) * NODE_RADIUS
+  const y1 = from.y + Math.sin(startAngle) * NODE_RADIUS
+  const x2 = to.x + Math.cos(endAngle) * NODE_RADIUS
+  const y2 = to.y + Math.sin(endAngle) * NODE_RADIUS
+  const midX = (x1 + x2) / 2
+  const midY = (y1 + y2) / 2
+  const nx = -(y2 - y1)
+  const ny = x2 - x1
+  const nlen = Math.max(1, Math.hypot(nx, ny))
+  const bow = synthetic ? 0.2 : 0.24
+  const cx = midX + (nx / nlen) * nlen * bow
+  const cy = midY + (ny / nlen) * nlen * bow
+  const path = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`
+  // Point on the curve at t=0.5 — the visual midpoint the delete dot should sit on.
+  const mx = 0.25 * x1 + 0.5 * cx + 0.25 * x2
+  const my = 0.25 * y1 + 0.5 * cy + 0.25 * y2
+  return { x1, y1, x2, y2, cx, cy, path, mx, my }
+}
+
 function nodeStatusLabel(node: WireNode, translate: (key: string) => string): string {
   if (node.status === 'removed' || node.activity === 'removed') return translate('activityRemoved')
   if (node.activity === 'running') return translate('activityRunning')
@@ -163,6 +210,26 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const hoverTimer = useRef<number | null>(null)
+
+  // Reveal an edge's delete dot and KEEP it revealed briefly after the pointer
+  // leaves the edge path, so the user can glide from the line onto the dot
+  // (which sits at the curve's midpoint) without it vanishing. Entering the
+  // dot cancels the pending clear.
+  const setHoverEdge = useCallback((id: string): void => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+    setHoverEdgeId(id)
+  }, [])
+  const clearHoverEdge = useCallback((id: string): void => {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current)
+    hoverTimer.current = window.setTimeout(() => {
+      setHoverEdgeId((current) => (current === id ? null : current))
+      hoverTimer.current = null
+    }, 180)
+  }, [])
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -265,18 +332,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     const dots: { id: string; cx: number; cy: number }[] = []
     for (const edge of meeting.edges) {
       if (edge.id.startsWith('synthetic:')) continue
-      const from = positions.get(edge.from)
-      const to = positions.get(edge.to)
-      if (from === undefined || to === undefined) continue
-      const midX = (from.x + to.x) / 2
-      const midY = (from.y + to.y) / 2
-      const nx = -(to.y - from.y)
-      const ny = to.x - from.x
-      const nlen = Math.max(1, Math.hypot(nx, ny))
-      const bow = 0.24
-      const cx = midX + (nx / nlen) * nlen * bow
-      const cy = midY + (ny / nlen) * nlen * bow
-      dots.push({ id: edge.id, cx, cy })
+      const geo = edgeCurveGeometry(edge, meeting, positions)
+      if (geo === null) continue
+      dots.push({ id: edge.id, cx: geo.mx, cy: geo.my })
     }
     return dots
   }, [meeting, positions])
@@ -459,8 +517,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       <g
         key={edge.id}
         className={styles.edgeGroup}
-        onMouseEnter={() => setHoverEdgeId(edge.id)}
-        onMouseLeave={() => setHoverEdgeId((current) => (current === edge.id ? null : current))}
+        onMouseEnter={() => setHoverEdge(edge.id)}
+        onMouseLeave={() => clearHoverEdge(edge.id)}
         onContextMenu={(event) => {
           if (synthetic) return
           event.preventDefault()
@@ -619,8 +677,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               className={[styles.edgeRemove, hoverEdgeId === dot.id ? styles.edgeRemoveActive : ''].filter(Boolean).join(' ')}
               style={{ left: dot.cx, top: dot.cy }}
               aria-label="delete edge"
-              onMouseEnter={() => setHoverEdgeId(dot.id)}
-              onMouseLeave={() => setHoverEdgeId((current) => (current === dot.id ? null : current))}
+              onMouseEnter={() => setHoverEdge(dot.id)}
+              onMouseLeave={() => clearHoverEdge(dot.id)}
               onClick={() => {
                 void rpc<unknown>('roundtable/edge.remove', { meetingId: meeting.id, edgeId: dot.id })
                   .then(() => refresh())
