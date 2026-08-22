@@ -479,12 +479,17 @@
   padding: 0;
   cursor: pointer;
   text-align: left;
+  border-radius: 4px;
+}
+
+.taskToggle:hover {
+  background: rgba(77, 107, 254, 0.08);
 }
 
 .taskChevron {
-  font-size: 10px;
-  color: rgba(0, 0, 0, 0.4);
-  width: 10px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+  width: 12px;
   flex: none;
 }
 
@@ -494,9 +499,20 @@
   color: rgba(0, 0, 0, 0.75);
 }
 
+/* Collapsed: always a single line with an ellipsis, regardless of length. */
 .taskRole {
   font-size: 11px;
   color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+/* Expanded: full role, wrapped. */
+.taskRoleExpanded {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.6);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;

@@ -139,12 +139,6 @@ function nodeStatusLabel(node: WireNode, translate: (key: string) => string): st
   return translate('activityReady')
 }
 
-/** One-line compaction for a role description in the collapsed task list. */
-function compactRole(role: string, limit = 46): string {
-  const single = role.replace(/\s+/g, ' ').trim()
-  return single.length > limit ? `${single.slice(0, limit)}…` : single
-}
-
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const { rpc, t: translate } = props
   // The `sessionId` prop is kept for slot-interface compatibility, but the
@@ -288,7 +282,17 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
   const openHint = (kind: 'agents' | 'kb', event: ReactMouseEvent<HTMLButtonElement>): void => {
     event.stopPropagation()
-    setHint({ kind, x: event.clientX, y: event.clientY })
+    const rect = event.currentTarget.getBoundingClientRect()
+    const width = 280
+    const height = 220
+    // Anchor below the "+" button, clamped inside the viewport so the popover
+    // never spills past the right or bottom edge.
+    let x = rect.left
+    let y = rect.bottom + 6
+    if (x + width > window.innerWidth - 8) x = window.innerWidth - width - 8
+    if (x < 8) x = 8
+    if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
+    setHint({ kind, x, y })
   }
 
   if (meeting === undefined) {
@@ -523,8 +527,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                     <span className={styles.taskChevron}>{expanded ? '▾' : '▸'}</span>
                     <span className={styles.taskKey}>{node.key}</span>
                   </button>
-                  <div className={styles.taskRole}>
-                    {expanded ? (node.role || '—') : compactRole(node.role || '—')}
+                  <div className={expanded ? styles.taskRoleExpanded : styles.taskRole}>
+                    {node.role || '—'}
                   </div>
                 </div>
               )
