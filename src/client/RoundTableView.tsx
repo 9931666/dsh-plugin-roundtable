@@ -555,7 +555,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         </section>
 
         <section className={styles.panel}>
-          <div className={styles.panelTitle}>{translate('activity')}</div>
+          <div className={styles.panelTitleRow}>
+            <span className={styles.panelTitle}>{translate('activity')}</span>
+          </div>
           <div className={styles.panelBody}>
             {(meeting.recent ?? []).length === 0 ? (
               <div className={styles.panelEmpty}>{translate('noActivity')}</div>
@@ -574,7 +576,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         </section>
 
         <section className={styles.panel}>
-          <div className={styles.panelTitle}>{translate('files')}</div>
+          <div className={styles.panelTitleRow}>
+            <span className={styles.panelTitle}>{translate('files')}</span>
+          </div>
           <div className={styles.panelBody}>
             <div className={styles.panelEmpty}>{translate('filesEmpty')}</div>
           </div>
