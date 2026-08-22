@@ -161,9 +161,11 @@
   background: #c62828;
   border: 1.5px solid #ffffff;
   color: #ffffff;
-  font-size: 13px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
-  text-align: center;
   padding: 0;
   cursor: pointer;
   z-index: 6;
