@@ -15,7 +15,7 @@
  * @module dsh-plugin-roundtable/client/RoundTableView
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
 import type { RpcCaller, WireEdge, WireMeeting, WireNode } from './wire.ts'
 import { fetchMeetings } from './wire.ts'
@@ -139,6 +139,12 @@ function nodeStatusLabel(node: WireNode, translate: (key: string) => string): st
   return translate('activityReady')
 }
 
+/** One-line compaction for a role description in the collapsed task list. */
+function compactRole(role: string, limit = 46): string {
+  const single = role.replace(/\s+/g, ' ').trim()
+  return single.length > limit ? `${single.slice(0, limit)}…` : single
+}
+
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const { rpc, t: translate } = props
   // The `sessionId` prop is kept for slot-interface compatibility, but the
@@ -146,6 +152,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // meetings stay visible across session switches, updates and restarts.
   const [meetings, setMeetings] = useState<WireMeeting[]>([])
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
+  const [expandedTask, setExpandedTask] = useState<string | null>(null)
+  const [hint, setHint] = useState<{ kind: 'agents' | 'kb'; x: number; y: number } | null>(null)
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -214,6 +222,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     return () => window.removeEventListener('click', close)
   }, [menu])
 
+  // Close the hint popover on any click elsewhere.
+  useEffect(() => {
+    if (hint === null) return
+    const close = (): void => setHint(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [hint])
+
   // Drag-to-connect: follow the pointer and drop on a target node.
   useEffect(() => {
     if (drag === null) return
@@ -269,6 +285,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }
     setMenu(null)
   }, [menu, refresh, rpc])
+
+  const openHint = (kind: 'agents' | 'kb', event: ReactMouseEvent<HTMLButtonElement>): void => {
+    event.stopPropagation()
+    setHint({ kind, x: event.clientX, y: event.clientY })
+  }
 
   if (meeting === undefined) {
     return (
@@ -443,7 +464,18 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
       <aside className={styles.sidebar}>
         <section className={styles.panel}>
-          <div className={styles.panelTitle}>{translate('agents')}</div>
+          <div className={styles.panelTitleRow}>
+            <span className={styles.panelTitle}>{translate('agents')}</span>
+            <button
+              type="button"
+              className={styles.panelAdd}
+              aria-label={translate('editAgents')}
+              title={translate('editAgents')}
+              onClick={(event) => openHint('agents', event)}
+            >
+              ＋
+            </button>
+          </div>
           <div className={styles.panelBody}>
             {meeting.nodes.map((node) => {
               const brand = providerBrand(node.provider)
@@ -466,19 +498,53 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         </section>
 
         <section className={styles.panel}>
-          <div className={styles.panelTitle}>{translate('tasks')}</div>
+          <div className={styles.panelTitleRow}>
+            <span className={styles.panelTitle}>{translate('tasks')}</span>
+            <button
+              type="button"
+              className={styles.panelAdd}
+              aria-label={translate('editAgents')}
+              title={translate('editAgents')}
+              onClick={(event) => openHint('agents', event)}
+            >
+              ＋
+            </button>
+          </div>
           <div className={styles.panelBody}>
-            {meeting.nodes.map((node) => (
-              <div className={styles.taskRow} key={node.key}>
-                <span className={styles.taskKey}>{node.key}</span>
-                <span className={styles.taskRole}>{node.role || '—'}</span>
-              </div>
-            ))}
+            {meeting.nodes.map((node) => {
+              const expanded = expandedTask === node.key
+              return (
+                <div className={styles.taskRow} key={node.key}>
+                  <button
+                    type="button"
+                    className={styles.taskToggle}
+                    onClick={() => setExpandedTask(expanded ? null : node.key)}
+                  >
+                    <span className={styles.taskChevron}>{expanded ? '▾' : '▸'}</span>
+                    <span className={styles.taskKey}>{node.key}</span>
+                  </button>
+                  <div className={styles.taskRole}>
+                    {expanded ? (node.role || '—') : compactRole(node.role || '—')}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </section>
 
         <section className={styles.panel}>
-          <div className={styles.panelTitle}>{translate('kb')}</div>
+          <div className={styles.panelTitleRow}>
+            <span className={styles.panelTitle}>{translate('kb')}</span>
+            <button
+              type="button"
+              className={styles.panelAdd}
+              aria-label={translate('editKb')}
+              title={translate('editKb')}
+              onClick={(event) => openHint('kb', event)}
+            >
+              ＋
+            </button>
+          </div>
           <div className={styles.panelBody}>
             <div className={styles.panelEmpty}>{translate('kbEmpty')}</div>
           </div>
@@ -511,6 +577,23 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         </section>
       </aside>
 
+      {hint !== null ? (
+        <div
+          className={styles.hintModal}
+          style={{ left: hint.x, top: hint.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className={styles.hintTitle}>
+            {hint.kind === 'agents' ? translate('agentsHintTitle') : translate('kbHintTitle')}
+          </div>
+          <div className={styles.hintBody}>
+            {hint.kind === 'agents' ? translate('agentsHint') : translate('kbHint')}
+          </div>
+          <button type="button" className={styles.hintClose} onClick={() => setHint(null)}>
+            {translate('edgeCancel')}
+          </button>
+        </div>
+      ) : null}
       {menu !== null ? (
         <div
           className={styles.contextMenu}

@@ -50,6 +50,12 @@ export type RoundTableKey =
   | 'kbEmpty'
   | 'filesEmpty'
   | 'noActivity'
+  | 'editAgents'
+  | 'editKb'
+  | 'agentsHintTitle'
+  | 'agentsHint'
+  | 'kbHintTitle'
+  | 'kbHint'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -103,6 +109,12 @@ export const zh: Record<RoundTableKey, string> = {
   kbEmpty: '暂无参考资料（后续支持上传与检索）',
   filesEmpty: '暂无文件产出',
   noActivity: '（暂无发言）',
+  editAgents: '新增 / 修改专家',
+  editKb: '知识库管理',
+  agentsHintTitle: '通过主持人修改',
+  agentsHint: '新增、修改或移除专家与分工，直接在聊天里告诉主持人（DeepSeek），例如：\n· 「再加一位安全合规专家」\n· 「把工程师的分工改成……」\n主持人会调用工具实时更新会议。',
+  kbHintTitle: '知识库',
+  kbHint: '知识库将支持上传参考资料与全文检索，属于后续迭代功能，敬请期待。',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -150,4 +162,10 @@ export const en: Record<RoundTableKey, string> = {
   kbEmpty: 'No reference materials yet (upload & search coming later)',
   filesEmpty: 'No file outputs yet',
   noActivity: '(no contributions yet)',
+  editAgents: 'Add or edit agents',
+  editKb: 'Manage knowledge base',
+  agentsHintTitle: 'Edit via the captain',
+  agentsHint: 'To add, change or remove agents and their roles, just tell the captain (DeepSeek) in chat, e.g.:\n· "Add a security & compliance expert"\n· "Change the engineer role to …"\nThe captain updates the meeting through tools in real time.',
+  kbHintTitle: 'Knowledge base',
+  kbHint: 'The knowledge base will support uploading reference materials and full-text search — a later iteration. Stay tuned.',
 }
