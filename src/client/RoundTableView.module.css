@@ -125,6 +125,7 @@
 .canvas {
   position: relative;
   flex: 1;
+  min-width: 320px;
   min-height: 420px;
   border-radius: 12px;
   background: #fafafa;

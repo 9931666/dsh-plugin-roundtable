@@ -191,21 +191,27 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }
   }, [])
 
-  // Measure the canvas with a reliable fallback (offsetWidth/offsetHeight,
-  // read once on mount and on every resize). This keeps the topology visible
-  // even if the host container measures 0 height on first paint.
+  // Measure the canvas with a hard fallback. Some host containers report a
+  // 0 box on first paint (flex under a yet-unsized slot), which would leave
+  // the topology empty; we fall back to a sane default so nodes always have
+  // coordinates, then correct to the real size once the layout settles.
   useEffect(() => {
     const container = containerRef.current
     if (container === null) return
     const measure = (): void => {
-      const w = container.offsetWidth
-      const h = container.offsetHeight
-      setSize((previous) => (previous.w === w && previous.h === h ? previous : { w, h }))
+      const w = container.clientWidth
+      const h = container.clientHeight
+      const next = { w: w > 0 ? w : 900, h: h > 0 ? h : 480 }
+      setSize((previous) => (previous.w === next.w && previous.h === next.h ? previous : next))
     }
     measure()
+    const raf = window.requestAnimationFrame(measure)
     const observer = new ResizeObserver(measure)
     observer.observe(container)
-    return () => observer.disconnect()
+    return () => {
+      window.cancelAnimationFrame(raf)
+      observer.disconnect()
+    }
   }, [])
 
   // Close the context menu on any click elsewhere.
