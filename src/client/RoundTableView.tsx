@@ -89,12 +89,12 @@ function layoutPositions(size: { w: number; h: number }, meeting: WireMeeting): 
   // next measure, mirroring the subagent-tree view which never goes blank.
   const w = size.w > 0 ? size.w : 900
   const h = size.h > 0 ? size.h : 480
-  positions.set('captain', { x: Math.max(64, w * 0.11), y: h * 0.5 })
-  positions.set('aggregator', { x: w * 0.47, y: h * 0.5 })
+  positions.set('captain', { x: Math.max(64, w * 0.10), y: h * 0.5 })
+  positions.set('aggregator', { x: Math.max(150, w * 0.33), y: h * 0.5 })
   const nodes = meeting.nodes
-  const centerX = w * 0.75
+  const centerX = w * 0.78
   const centerY = h * 0.5
-  const radius = Math.min(w * 0.19, h * 0.36)
+  const radius = Math.min(w * 0.20, h * 0.36)
   nodes.forEach((node, index) => {
     const angle = -Math.PI / 2 + (index / Math.max(1, nodes.length)) * Math.PI * 2
     positions.set(node.key, {
@@ -160,6 +160,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -254,6 +255,31 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     () => meeting === undefined ? new Map<string, Point>() : layoutPositions(size, meeting),
     [meeting, size],
   )
+
+  // Top-layer delete dots for REAL edges: positioned at each edge's bezier
+  // midpoint but rendered ABOVE the nodes (the SVG layer sits under the nodes,
+  // so a dot at a midpoint that lands inside a node would be hidden). Shown
+  // while that edge is hovered, and never for synthetic implied edges.
+  const edgeRemoveDots = useMemo(() => {
+    if (meeting === undefined) return []
+    const dots: { id: string; cx: number; cy: number }[] = []
+    for (const edge of meeting.edges) {
+      if (edge.id.startsWith('synthetic:')) continue
+      const from = positions.get(edge.from)
+      const to = positions.get(edge.to)
+      if (from === undefined || to === undefined) continue
+      const midX = (from.x + to.x) / 2
+      const midY = (from.y + to.y) / 2
+      const nx = -(to.y - from.y)
+      const ny = to.x - from.x
+      const nlen = Math.max(1, Math.hypot(nx, ny))
+      const bow = 0.24
+      const cx = midX + (nx / nlen) * nlen * bow
+      const cy = midY + (ny / nlen) * nlen * bow
+      dots.push({ id: edge.id, cx, cy })
+    }
+    return dots
+  }, [meeting, positions])
 
   // Drag-to-connect: follow the pointer and drop on a target node. All drag
   // coordinates are canvas-relative (node positions are canvas-relative too),
@@ -433,6 +459,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       <g
         key={edge.id}
         className={styles.edgeGroup}
+        onMouseEnter={() => setHoverEdgeId(edge.id)}
+        onMouseLeave={() => setHoverEdgeId((current) => (current === edge.id ? null : current))}
         onContextMenu={(event) => {
           if (synthetic) return
           event.preventDefault()
@@ -442,27 +470,6 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         <path d={path} fill="none" className={roleClass} />
         <polygon points={head} className={arrowClass} />
         {tail !== null ? <polygon points={tail} className={arrowClass} /> : null}
-        {/* Hover delete affordance: a small red circle with an X at the
-            edge's midpoint (hidden for synthetic implied edges). */}
-        {synthetic ? null : (
-          <g
-            className={styles.edgeRemove}
-            role="button"
-            aria-label="delete edge"
-            onClick={(event) => {
-              event.stopPropagation()
-              void rpc<unknown>('roundtable/edge.remove', { meetingId: meeting.id, edgeId: edge.id })
-                .then(() => refresh())
-                .catch(() => undefined)
-            }}
-          >
-            <circle cx={cx} cy={cy} r={9} className={styles.edgeRemoveBg} />
-            <path
-              d={`M ${cx - 3} ${cy - 3} L ${cx + 3} ${cy + 3} M ${cx + 3} ${cy - 3} L ${cx - 3} ${cy + 3}`}
-              className={styles.edgeRemoveX}
-            />
-          </g>
-        )}
       </g>
     )
   }
@@ -605,6 +612,24 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           {renderNode('captain', 'DeepSeek · 主持', 'captain')}
           {renderNode('aggregator', '汇聚网关', 'aggregator')}
           {meeting.nodes.map((node) => renderNode(node.key, node.key, 'node'))}
+          {edgeRemoveDots.map((dot) => (
+            <button
+              key={dot.id}
+              type="button"
+              className={[styles.edgeRemove, hoverEdgeId === dot.id ? styles.edgeRemoveActive : ''].filter(Boolean).join(' ')}
+              style={{ left: dot.cx, top: dot.cy }}
+              aria-label="delete edge"
+              onMouseEnter={() => setHoverEdgeId(dot.id)}
+              onMouseLeave={() => setHoverEdgeId((current) => (current === dot.id ? null : current))}
+              onClick={() => {
+                void rpc<unknown>('roundtable/edge.remove', { meetingId: meeting.id, edgeId: dot.id })
+                  .then(() => refresh())
+                  .catch(() => undefined)
+              }}
+            >
+              ×
+            </button>
+          ))}
           {activeMessages.map((message) => {
             const from = positions.get(message.from)
             const to = positions.get(message.to)

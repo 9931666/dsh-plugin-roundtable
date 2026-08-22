@@ -144,31 +144,44 @@
   cursor: pointer;
 }
 
-/* Hover delete affordance: a red circle with an X at the edge's midpoint,
-   revealed while the edge is hovered. */
+.edgeGroup path {
+  pointer-events: stroke;
+}
+
+/* Hover delete affordance: a red circle with an X floating ABOVE the canvas
+   at the edge's midpoint. It lives in a top layer (not the SVG, which sits
+   under the nodes) so a midpoint that lands inside a node is never hidden.
+   Revealed while the edge (or the button itself) is hovered. */
 .edgeRemove {
-  pointer-events: auto;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #c62828;
+  border: 1.5px solid #ffffff;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1;
+  text-align: center;
+  padding: 0;
   cursor: pointer;
+  z-index: 6;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 120ms ease;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
 }
 
-.edgeGroup:hover .edgeRemove,
-.edgeRemove:focus-visible {
+.edgeRemoveActive {
   opacity: 1;
+  pointer-events: auto;
 }
 
-.edgeRemoveBg {
-  fill: #c62828;
-  stroke: #ffffff;
-  stroke-width: 1.2;
-}
-
-.edgeRemoveX {
-  stroke: #ffffff;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  fill: none;
+.edgeRemove:hover {
+  opacity: 1;
+  pointer-events: auto;
+  background: #b71c1c;
 }
 
 .edgeForward {
