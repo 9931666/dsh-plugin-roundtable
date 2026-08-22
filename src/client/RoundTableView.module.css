@@ -144,6 +144,33 @@
   cursor: pointer;
 }
 
+/* Hover delete affordance: a red circle with an X at the edge's midpoint,
+   revealed while the edge is hovered. */
+.edgeRemove {
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.edgeGroup:hover .edgeRemove,
+.edgeRemove:focus-visible {
+  opacity: 1;
+}
+
+.edgeRemoveBg {
+  fill: #c62828;
+  stroke: #ffffff;
+  stroke-width: 1.2;
+}
+
+.edgeRemoveX {
+  stroke: #ffffff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  fill: none;
+}
+
 .edgeForward {
   stroke: rgba(90, 90, 90, 0.5);
   stroke-width: 1.5;

@@ -442,6 +442,27 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         <path d={path} fill="none" className={roleClass} />
         <polygon points={head} className={arrowClass} />
         {tail !== null ? <polygon points={tail} className={arrowClass} /> : null}
+        {/* Hover delete affordance: a small red circle with an X at the
+            edge's midpoint (hidden for synthetic implied edges). */}
+        {synthetic ? null : (
+          <g
+            className={styles.edgeRemove}
+            role="button"
+            aria-label="delete edge"
+            onClick={(event) => {
+              event.stopPropagation()
+              void rpc<unknown>('roundtable/edge.remove', { meetingId: meeting.id, edgeId: edge.id })
+                .then(() => refresh())
+                .catch(() => undefined)
+            }}
+          >
+            <circle cx={cx} cy={cy} r={9} className={styles.edgeRemoveBg} />
+            <path
+              d={`M ${cx - 3} ${cy - 3} L ${cx + 3} ${cy + 3} M ${cx + 3} ${cy - 3} L ${cx - 3} ${cy + 3}`}
+              className={styles.edgeRemoveX}
+            />
+          </g>
+        )}
       </g>
     )
   }
