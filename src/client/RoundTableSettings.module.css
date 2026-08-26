@@ -35,6 +35,58 @@
   line-height: 1.6;
 }
 
+/* Minimal toggle switch. */
+.switchRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.switchInput {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switchTrack {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.35);
+  transition: background 140ms ease;
+  flex: none;
+}
+
+.switchTrack::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 140ms ease;
+}
+
+.switchInput:checked + .switchTrack {
+  background: #4d6bfe;
+}
+
+.switchInput:checked + .switchTrack::after {
+  transform: translateX(16px);
+}
+
+.switchLabel {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
 .warning {
   font-size: 12px;
   color: #a06b00;

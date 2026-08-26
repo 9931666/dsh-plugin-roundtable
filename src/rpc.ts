@@ -22,8 +22,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
+import { rm } from 'node:fs/promises'
 import type { EdgeDirection } from './types.ts'
-import { readMeeting, stateRootOf, withMeetingLock, writeMeeting } from './state.ts'
+import { meetingDirOf, readMeeting, stateRootOf, withMeetingLock, writeMeeting } from './state.ts'
 import { buildCharter } from './charter.ts'
 
 /** RPC result envelope (mirrors the apiproxy wire shape). */
@@ -36,6 +37,8 @@ export interface RoundTablePreferences {
   readonly defaultMode: 'orchestrated' | 'egalitarian'
   readonly maxRounds: number
   readonly maxTokens: number
+  /** 互通开关：true = 显示所有圆桌会议；false = 仅显示当前对话开启的会议。 */
+  readonly showAllMeetings: boolean
 }
 
 /** Holder shared between the settings fiber and the RPC fiber. */
@@ -99,6 +102,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               defaultMode: prefs.defaultMode,
               maxRounds: prefs.maxRounds,
               maxTokens: prefs.maxTokens,
+              showAllMeetings: prefs.showAllMeetings,
             })
           }
           case 'roundtable/prefs.set': {
@@ -114,12 +118,14 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
                 defaultMode: patch.defaultMode === 'orchestrated' || patch.defaultMode === 'egalitarian' ? patch.defaultMode : base.defaultMode,
                 maxRounds: typeof patch.maxRounds === 'number' && Number.isFinite(patch.maxRounds) && patch.maxRounds >= 1 ? Math.floor(patch.maxRounds) : base.maxRounds,
                 maxTokens: typeof patch.maxTokens === 'number' && Number.isFinite(patch.maxTokens) && patch.maxTokens >= 1000 ? Math.floor(patch.maxTokens) : base.maxTokens,
+                showAllMeetings: typeof patch.showAllMeetings === 'boolean' ? patch.showAllMeetings : base.showAllMeetings,
               }
               runtime.fallbackPrefs = next
               return ok<RoundTablePreferences>({
                 defaultMode: next.defaultMode,
                 maxRounds: next.maxRounds,
                 maxTokens: next.maxTokens,
+                showAllMeetings: next.showAllMeetings,
               })
             }
             await runtime.scope.update(patch as object)
@@ -128,6 +134,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               defaultMode: next.defaultMode,
               maxRounds: next.maxRounds,
               maxTokens: next.maxTokens,
+              showAllMeetings: next.showAllMeetings,
             })
           }
           case 'roundtable/edge.set': {
@@ -189,6 +196,25 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               meeting.charter = buildCharter(meeting)
               await writeMeeting(stateRoot, meeting)
               return ok({ removed: before !== meeting.edges.length })
+            })
+          }
+          case 'roundtable/meeting.delete': {
+            const body = payload as { meetingId?: unknown } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            if (meetingId === '') return fail('payload must be { meetingId }')
+            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+              const meeting = await readMeeting(stateRoot, meetingId)
+              if (meeting === undefined) return ok({ deleted: false })
+              // Best-effort: interrupt the meeting's expert subagents first so
+              // no orphan keeps running after the meeting is gone.
+              const agents = (ctx as unknown as { agents?: { interrupt?: (id: string) => unknown } }).agents
+              for (const node of meeting.nodes) {
+                if (node.id !== '' && agents?.interrupt !== undefined) {
+                  try { agents.interrupt(node.id) } catch { /* best-effort */ }
+                }
+              }
+              await rm(meetingDirOf(stateRoot, meetingId), { recursive: true, force: true })
+              return ok({ deleted: true })
             })
           }
           default:

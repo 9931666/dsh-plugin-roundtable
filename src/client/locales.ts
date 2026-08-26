@@ -57,6 +57,12 @@ export type RoundTableKey =
   | 'agentsHint'
   | 'kbHintTitle'
   | 'kbHint'
+  | 'meetingDelete'
+  | 'meetingDeleteConfirm'
+  | 'settingsShowAll'
+  | 'settingsShowAllHint'
+  | 'settingsShowAllOn'
+  | 'settingsShowAllOff'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -117,6 +123,12 @@ export const zh: Record<RoundTableKey, string> = {
   agentsHint: '新增、修改或移除专家与分工，直接在聊天里告诉主持人（DeepSeek），例如：\n· 「再加一位安全合规专家」\n· 「把工程师的分工改成……」\n主持人会调用工具实时更新会议。',
   kbHintTitle: '知识库',
   kbHint: '知识库将支持上传参考资料与全文检索，属于后续迭代功能，敬请期待。',
+  meetingDelete: '删除会议',
+  meetingDeleteConfirm: '确定删除会议「{name}」？此操作不可恢复（会议文件将被永久删除）。',
+  settingsShowAll: '互通（跨对话查看会议）',
+  settingsShowAllHint: '开启：查看所有对话开启的圆桌会议；关闭：仅查看当前对话开启的圆桌会议。',
+  settingsShowAllOn: '开启',
+  settingsShowAllOff: '关闭',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -171,4 +183,10 @@ export const en: Record<RoundTableKey, string> = {
   agentsHint: 'To add, change or remove agents and their roles, just tell the captain (DeepSeek) in chat, e.g.:\n· "Add a security & compliance expert"\n· "Change the engineer role to …"\nThe captain updates the meeting through tools in real time.',
   kbHintTitle: 'Knowledge base',
   kbHint: 'The knowledge base will support uploading reference materials and full-text search — a later iteration. Stay tuned.',
+  meetingDelete: 'Delete meeting',
+  meetingDeleteConfirm: 'Delete meeting "{name}"? This cannot be undone (the meeting files will be permanently removed).',
+  settingsShowAll: 'Show meetings across conversations',
+  settingsShowAllHint: 'On: show every round-table meeting. Off: only meetings started by this conversation.',
+  settingsShowAllOn: 'On',
+  settingsShowAllOff: 'Off',
 }

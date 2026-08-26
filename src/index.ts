@@ -65,6 +65,7 @@ const PreferenceSchema = z.object({
   defaultMode: z.union(['orchestrated', 'egalitarian']).default('orchestrated'),
   maxRounds: z.natural().default(10),
   maxTokens: z.natural().default(200_000),
+  showAllMeetings: z.boolean().default(true),
 })
 
 /** The model-facing usage policy: when and how to drive RoundTable. */
@@ -148,7 +149,7 @@ export function apply(ctx: Context, config: Config): void {
   const runtime: RoundTableRuntime = {
     scope: undefined,
     stateDir: resolved.stateDir,
-    fallbackPrefs: { defaultMode: resolved.defaultMode, maxRounds: 10, maxTokens: 200_000 },
+    fallbackPrefs: { defaultMode: resolved.defaultMode, maxRounds: 10, maxTokens: 200_000, showAllMeetings: true },
   }
   ctx.inject(['settings'], (settingsCtx) => {
     try {

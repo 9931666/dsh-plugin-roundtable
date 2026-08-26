@@ -194,8 +194,14 @@ function nodeStatusLabel(node: WireNode, translate: (key: string) => string): st
   return translate('activityReady')
 }
 
+/** 来源对话短号前缀（显示在会议切换下拉里，区分不同对话开的会议）。 */
+function sourcePrefix(captainSessionId: string): string {
+  if (captainSessionId === '') return '对话'
+  return `对话-${captainSessionId.slice(0, 4)}`
+}
+
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
-  const { rpc, t: translate } = props
+  const { sessionId, rpc, t: translate } = props
   // The `sessionId` prop is kept for slot-interface compatibility, but the
   // tab queries ALL meetings in the workspace (no session filter): past
   // meetings stay visible across session switches, updates and restarts.
@@ -208,6 +214,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [drag, setDrag] = useState<DragState | null>(null)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(true)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const containerRef = useRef<HTMLDivElement | null>(null)
   const hoverTimer = useRef<number | null>(null)
@@ -233,13 +240,25 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      const next = await fetchMeetings()
+      const next = await fetchMeetings(showAll ? undefined : String(sessionId))
       setMeetings(next)
       setFetchFailed(false)
     } catch {
       setFetchFailed(true)
     }
-  }, [])
+  }, [sessionId, showAll])
+
+  // Load the 互通 preference once; it decides whether this tab lists every
+  // meeting in the workspace (on) or only meetings this conversation started.
+  useEffect(() => {
+    void rpc<{ showAllMeetings?: boolean }>('roundtable/prefs.get', {})
+      .then((result) => {
+        if (result.ok && typeof result.value?.showAllMeetings === 'boolean') {
+          setShowAll(result.value.showAllMeetings)
+        }
+      })
+      .catch(() => undefined)
+  }, [rpc])
 
   // Poll the snapshot every second.
   useEffect(() => {
@@ -249,7 +268,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       if (inflight) return
       inflight = true
       try {
-        const next = await fetchMeetings()
+        const next = await fetchMeetings(showAll ? undefined : String(sessionId))
         if (alive) {
           setMeetings(next)
           setFetchFailed(false)
@@ -266,7 +285,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       alive = false
       window.clearInterval(timer)
     }
-  }, [])
+  }, [sessionId, showAll])
 
   // Measure the canvas with a hard fallback. Some host containers report a
   // 0 box on first paint (flex under a yet-unsized slot), which would leave
@@ -613,7 +632,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               >
                 {meetings.map((candidate) => (
                   <option key={candidate.id} value={candidate.id}>
-                    {candidate.name} · {candidate.mode === 'egalitarian' ? translate('modeEgalitarian') : translate('modeOrchestrated')} · {candidate.status}
+                    {sourcePrefix(candidate.captainSessionId)} · {candidate.name}
                   </option>
                 ))}
               </select>
@@ -621,6 +640,21 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             <span className={styles.badge}>{modeLabel}</span>
             <span className={styles.badge}>{meeting.status}</span>
             <span className={styles.round}>{translate('round')} {meeting.round}</span>
+            <button
+              type="button"
+              className={styles.meetingDelete}
+              aria-label={translate('meetingDelete')}
+              title={translate('meetingDelete')}
+              onClick={() => {
+                const confirmed = window.confirm(translate('meetingDeleteConfirm').replace('{name}', meeting.name))
+                if (!confirmed) return
+                void rpc<unknown>('roundtable/meeting.delete', { meetingId: meeting.id })
+                  .then(() => { setSelectedId(undefined); void refresh() })
+                  .catch(() => undefined)
+              }}
+            >
+              🗑
+            </button>
           </div>
           <div className={styles.budgetRow}>
             <span className={styles.budgetLabel}>{translate('roundsBudget')}</span>

@@ -54,6 +54,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       defaultMode: prefs.defaultMode,
       maxRounds: prefs.maxRounds,
       maxTokens: prefs.maxTokens,
+      showAllMeetings: prefs.showAllMeetings,
     })
       .then((result) => {
         setSaving(false)
@@ -117,6 +118,20 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
             patch({ maxTokens: value })
           }}
         />
+      </div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('settingsShowAll')}</label>
+        <label className={styles.switchRow}>
+          <input
+            type="checkbox"
+            className={styles.switchInput}
+            checked={prefs.showAllMeetings}
+            onChange={(event) => patch({ showAllMeetings: event.target.checked })}
+          />
+          <span className={styles.switchTrack} aria-hidden="true" />
+          <span className={styles.switchLabel}>{prefs.showAllMeetings ? t('settingsShowAllOn') : t('settingsShowAllOff')}</span>
+        </label>
+        <div className={styles.hint}>{t('settingsShowAllHint')}</div>
       </div>
       <div className={styles.actions}>
         <button type="button" className={styles.saveButton} disabled={saving} onClick={save}>

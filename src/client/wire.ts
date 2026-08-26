@@ -63,6 +63,7 @@ export interface WireMeeting {
   status: string
   round: number
   workspace: string
+  captainSessionId: string
   budget: WireBudget
   nodes: WireNode[]
   edges: WireEdge[]
@@ -76,17 +77,18 @@ export interface RoundTablePrefs {
   defaultMode: 'orchestrated' | 'egalitarian'
   maxRounds: number
   maxTokens: number
+  /** 互通开关：true=显示所有圆桌会议；false=仅显示当前对话开启的会议。 */
+  showAllMeetings: boolean
 }
 
 /**
- * Poll the meeting snapshot for this workspace. No session filter: the tab
- * must keep showing past meetings even after the session changed (new
- * session, plugin update, restart), because a meeting's captain session may
- * no longer exist. The host route lists every meeting under every workspace
- * when the `session` parameter is omitted.
+ * Poll the meeting snapshot. Without a session id the host lists every
+ * meeting under every workspace (互通开); with one it filters by captain
+ * session (互通关 — only meetings started by the current conversation).
  */
-export async function fetchMeetings(): Promise<WireMeeting[]> {
-  const response = await fetch('/plugins/dsh-plugin-roundtable/state', {
+export async function fetchMeetings(sessionId?: string): Promise<WireMeeting[]> {
+  const query = sessionId === undefined ? '' : `?session=${encodeURIComponent(sessionId)}`
+  const response = await fetch(`/plugins/dsh-plugin-roundtable/state${query}`, {
     cache: 'no-store',
   })
   if (!response.ok) throw new Error(`roundtable state route returned ${response.status}`)
