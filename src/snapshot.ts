@@ -23,6 +23,8 @@ export interface MeetingSnapshot {
   workspace: string
   /** 主持（创建）该会议的会话 id —— 用于"来源对话"前缀与互通过滤。 */
   captainSessionId: string
+  /** 知识库目录（阅览版）；空 = 未设置。 */
+  kbPath: string
   budget: {
     maxRounds: number
     maxTokens: number
@@ -181,6 +183,7 @@ export async function collectMeetingSnapshots(
         round: meeting.round,
         workspace: root.workspace,
         captainSessionId: meeting.captainSessionId,
+        kbPath: meeting.kbPath ?? '',
         budget: {
           maxRounds: meeting.budget.maxRounds,
           maxTokens: meeting.budget.maxTokens,

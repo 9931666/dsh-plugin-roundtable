@@ -1142,6 +1142,93 @@
   color: #4d6bfe;
 }
 
+/* ---------- knowledge base (阅览版) ---------- */
+
+.kbPathRow {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.65);
+  background: rgba(77, 107, 254, 0.07);
+  border: 1px solid rgba(77, 107, 254, 0.25);
+  border-radius: 6px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}
+
+.kbPathForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fafafa;
+}
+
+.kbChangedRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.7);
+  cursor: pointer;
+  user-select: none;
+}
+
+.switchInput {
+  accent-color: #4d6bfe;
+  cursor: pointer;
+}
+
+.kbList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafafa;
+}
+
+.kbRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.kbKindDir,
+.kbKindFile {
+  font-size: 13px;
+  flex: none;
+  opacity: 0.85;
+}
+
+.kbName {
+  flex: 1;
+  min-width: 0;
+  color: rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kbMeta {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.45);
+  flex: none;
+}
+
+.kbError {
+  font-size: 12px;
+  color: #c62828;
+  line-height: 1.5;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .breathing {
     animation: none;

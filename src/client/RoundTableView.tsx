@@ -15,9 +15,9 @@
  * @module dsh-plugin-roundtable/client/RoundTableView
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
-import type { RpcCaller, WireEdge, WireMeeting, WireNode, WireProviderOption } from './wire.ts'
+import type { RpcCaller, WireEdge, WireKbListing, WireMeeting, WireNode, WireProviderOption } from './wire.ts'
 import { fetchMeetings } from './wire.ts'
 import styles from './RoundTableView.module.css'
 
@@ -206,6 +206,13 @@ function sanitizeKey(value: string): string {
   return cleaned === '' ? '' : cleaned
 }
 
+/** 人类可读的文件大小（B/KB/MB）。 */
+function formatKbSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${bytes} B`
+}
+
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const { sessionId, rpc, t: translate } = props
   // The `sessionId` prop is kept for slot-interface compatibility, but the
@@ -214,11 +221,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [meetings, setMeetings] = useState<WireMeeting[]>([])
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
-  const [hint, setHint] = useState<{ kind: 'kb'; x: number; y: number } | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
   const [providers, setProviders] = useState<WireProviderOption[]>([])
   const [modelsLoaded, setModelsLoaded] = useState(false)
   const [form, setForm] = useState<{ name: string; role: string; provider: string; model: string }>({ name: '', role: '', provider: '', model: '' })
+  const [kbOpen, setKbOpen] = useState(false)
+  const [kbPathInput, setKbPathInput] = useState('')
+  const [kbListing, setKbListing] = useState<WireKbListing | null>(null)
+  const [kbContentChanged, setKbContentChanged] = useState(false)
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -327,14 +337,6 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [menu])
-
-  // Close the hint popover on any click elsewhere.
-  useEffect(() => {
-    if (hint === null) return
-    const close = (): void => setHint(null)
-    window.addEventListener('click', close)
-    return () => window.removeEventListener('click', close)
-  }, [hint])
 
   // Auto-dismiss the connect-result toast after a short beat.
   useEffect(() => {
@@ -445,19 +447,70 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     setMenu(null)
   }, [menu, refresh, rpc])
 
-  const openHint = (kind: 'kb', event: ReactMouseEvent<HTMLButtonElement>): void => {
-    event.stopPropagation()
-    const rect = event.currentTarget.getBoundingClientRect()
-    const width = 280
-    const height = 220
-    // Anchor below the "+" button, clamped inside the viewport so the popover
-    // never spills past the right or bottom edge.
-    let x = rect.left
-    let y = rect.bottom + 6
-    if (x + width > window.innerWidth - 8) x = window.innerWidth - width - 8
-    if (x < 8) x = 8
-    if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
-    setHint({ kind, x, y })
+  // ---- Knowledge-base (阅览版) -----------------------------------------
+  // The KB is a plain folder on disk: the UI only shows the path and lists
+  // the first level (names/formats/sizes). File contents are never opened in
+  // the UI — the captain reads and relays them to experts on demand.
+  const loadKbList = useCallback((path: string): void => {
+    if (meeting === undefined || path === '') return
+    void rpc<WireKbListing>('roundtable/kb.list', { meetingId: meeting.id })
+      .then((result) => {
+        if (result.ok) {
+          setKbListing(result.value)
+        } else {
+          setKbListing({ path: '', configured: false, error: result.error?.message ?? 'kb list failed', files: [] })
+        }
+      })
+      .catch(() => setKbListing({ path: '', configured: false, error: 'kb list failed', files: [] }))
+  }, [meeting, rpc])
+
+  const openKb = (): void => {
+    setKbOpen(true)
+    setKbPathInput(meeting?.kbPath ?? '')
+    setKbContentChanged(false)
+    setKbListing(null)
+    if (meeting !== undefined && meeting.kbPath !== '') loadKbList(meeting.kbPath)
+  }
+
+  const closeKb = (): void => {
+    setKbOpen(false)
+    setKbListing(null)
+  }
+
+  // Save the KB path (validated on the host), record the change for the
+  // captain (user-action kb-path), then refresh the listing. Checking
+  // "已修改知识库部分内容" additionally records that file contents changed so
+  // the captain re-browses to refresh its understanding.
+  const saveKbPath = (): void => {
+    if (meeting === undefined) return
+    const path = kbPathInput.trim()
+    if (path === '') {
+      setToast({ kind: 'err', text: translate('kbPathRequired') })
+      return
+    }
+    void rpc<{ path: string }>('roundtable/kb.path.set', { meetingId: meeting.id, path })
+      .then((result) => {
+        if (!result.ok) {
+          setToast({ kind: 'err', text: result.error?.message ?? translate('kbSaveFailed') })
+          return
+        }
+        const saved = result.value.path
+        const actions: { kind: 'kb-path'; text: string }[] = [{ kind: 'kb-path', text: `修改了知识库路径为 ${saved}` }]
+        if (kbContentChanged) actions.push({ kind: 'kb-path', text: '已修改知识库部分内容，请重新阅览以更新认知' })
+        const queue = actions.map((action) => rpc<unknown>('roundtable/user-actions.append', {
+          meetingId: meeting.id,
+          kind: action.kind,
+          text: action.text,
+        }))
+        void Promise.allSettled(queue).then(() => {
+          setToast({ kind: 'ok', text: translate('kbSaved') })
+          setKbPathInput(saved)
+          setKbContentChanged(false)
+          loadKbList(saved)
+          void refresh()
+        })
+      })
+      .catch(() => setToast({ kind: 'err', text: translate('kbSaveFailed') }))
   }
 
   // Pending expert edits derived from the meeting's user-actions file: keys
@@ -943,13 +996,17 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               className={styles.panelAdd}
               aria-label={translate('editKb')}
               title={translate('editKb')}
-              onClick={(event) => openHint('kb', event)}
+              onClick={openKb}
             >
               ＋
             </button>
           </div>
           <div className={styles.panelBody}>
-            <div className={styles.panelEmpty}>{translate('kbEmpty')}</div>
+            {meeting.kbPath !== '' ? (
+              <div className={styles.kbPathRow} title={meeting.kbPath}>{meeting.kbPath}</div>
+            ) : (
+              <div className={styles.panelEmpty}>{translate('kbNotSet')}</div>
+            )}
           </div>
         </section>
 
@@ -984,17 +1041,75 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         </section>
       </aside>
 
-      {hint !== null ? (
-        <div
-          className={styles.hintModal}
-          style={{ left: hint.x, top: hint.y }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className={styles.hintTitle}>{translate('kbHintTitle')}</div>
-          <div className={styles.hintBody}>{translate('kbHint')}</div>
-          <button type="button" className={styles.hintClose} onClick={() => setHint(null)}>
-            {translate('edgeCancel')}
-          </button>
+      {kbOpen ? (
+        <div className={styles.manageOverlay} onClick={closeKb}>
+          <div
+            className={styles.manageModal}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-label={translate('kbTitle')}
+          >
+            <div className={styles.manageTitle}>
+              {translate('kbTitle')} · {meeting.name}
+            </div>
+
+            <div className={styles.kbPathForm}>
+              <div className={styles.manageFormRow}>
+                <label className={styles.manageLabel}>{translate('kbPathLabel')}</label>
+                <input
+                  className={styles.manageInput}
+                  value={kbPathInput}
+                  placeholder={translate('kbPathPlaceholder')}
+                  onChange={(event) => setKbPathInput(event.target.value)}
+                />
+              </div>
+              <label className={styles.kbChangedRow}>
+                <input
+                  type="checkbox"
+                  className={styles.switchInput}
+                  checked={kbContentChanged}
+                  onChange={(event) => setKbContentChanged(event.target.checked)}
+                />
+                <span>{translate('kbContentChanged')}</span>
+              </label>
+              <button type="button" className={styles.manageAddBtn} onClick={saveKbPath}>
+                {translate('kbSave')}
+              </button>
+            </div>
+
+            <div className={styles.manageSectionTitle}>{translate('kbFiles')}</div>
+            <div className={styles.kbList}>
+              {kbListing === null ? (
+                <div className={styles.panelEmpty}>{translate('kbLoadHint')}</div>
+              ) : kbListing.error !== '' ? (
+                <div className={styles.kbError}>{kbListing.error}</div>
+              ) : kbListing.files.length === 0 ? (
+                <div className={styles.panelEmpty}>{translate('kbEmpty')}</div>
+              ) : (
+                kbListing.files.map((entry) => (
+                  <div className={styles.kbRow} key={entry.name}>
+                    <span className={entry.kind === 'dir' ? styles.kbKindDir : styles.kbKindFile}>
+                      {entry.kind === 'dir' ? '📁' : '📄'}
+                    </span>
+                    <span className={styles.kbName} title={entry.name}>{entry.name}</span>
+                    {entry.kind === 'file' ? (
+                      <span className={styles.kbMeta}>
+                        {entry.ext !== '' ? `.${entry.ext}` : ''}
+                        {entry.size > 0 ? ` · ${formatKbSize(entry.size)}` : ''}
+                      </span>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className={styles.manageFooter}>
+              <span className={styles.manageHint}>{translate('kbBrowseHint')}</span>
+              <button type="button" className={styles.manageCloseBtn} onClick={closeKb}>
+                {translate('manageClose')}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       {manageOpen ? (

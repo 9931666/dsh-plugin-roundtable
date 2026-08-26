@@ -765,6 +765,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         status: meeting.status,
         viewer: identity.kind === 'captain' ? CAPTAIN_KEY : identity.name,
         round: meeting.round,
+        kb_path: meeting.kbPath ?? '',
         budget: {
           max_rounds: meeting.budget.maxRounds,
           max_tokens: meeting.budget.maxTokens,
@@ -983,6 +984,7 @@ function renderStatus(value: Record<string, unknown>): string {
   const recent = Array.isArray(value.recent_utterances) ? value.recent_utterances as Record<string, unknown>[] : []
   const lines: string[] = [
     `Meeting "${String(value.meeting_name)}" (id ${String(value.meeting_id)}, mode ${String(value.mode)}, status ${String(value.status)}, round ${String(value.round)})`,
+    `Knowledge base path: ${String(value.kb_path ?? '') === '' ? '(none)' : String(value.kb_path)}`,
     `Budget: ${String(budget.used_rounds)}/${String(budget.max_rounds)} rounds, ${String(budget.used_tokens)}/${String(budget.max_tokens)} tokens`,
     `Nodes (${nodes.length}):`,
     ...nodes.map((node) => `  - ${String(node.key)} [${String(node.role ?? '')}] ${String(node.status)}/${String(node.activity ?? '')} · ${String(node.provider ?? '')}/${String(node.model ?? '')}`),

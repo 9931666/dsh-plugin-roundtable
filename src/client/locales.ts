@@ -53,10 +53,18 @@ export type RoundTableKey =
   | 'noActivity'
   | 'editAgents'
   | 'editKb'
-  | 'agentsHintTitle'
-  | 'agentsHint'
-  | 'kbHintTitle'
-  | 'kbHint'
+  | 'kbTitle'
+  | 'kbPathLabel'
+  | 'kbPathPlaceholder'
+  | 'kbPathRequired'
+  | 'kbSave'
+  | 'kbSaved'
+  | 'kbSaveFailed'
+  | 'kbFiles'
+  | 'kbLoadHint'
+  | 'kbContentChanged'
+  | 'kbBrowseHint'
+  | 'kbNotSet'
   | 'meetingDelete'
   | 'meetingDeleteConfirm'
   | 'settingsShowAll'
@@ -139,15 +147,23 @@ export const zh: Record<RoundTableKey, string> = {
   kb: '知识库',
   activity: '发言记录',
   files: '产出文件',
-  kbEmpty: '暂无参考资料（后续支持上传与检索）',
+  kbEmpty: '该文件夹内暂无文件',
   filesEmpty: '暂无文件产出',
   noActivity: '（暂无发言）',
   editAgents: '新增 / 修改专家',
   editKb: '知识库管理',
-  agentsHintTitle: '通过主持人修改',
-  agentsHint: '新增、修改或移除专家与分工，直接在聊天里告诉主持人（DeepSeek），例如：\n· 「再加一位安全合规专家」\n· 「把工程师的分工改成……」\n主持人会调用工具实时更新会议。',
-  kbHintTitle: '知识库',
-  kbHint: '知识库将支持上传参考资料与全文检索，属于后续迭代功能，敬请期待。',
+  kbTitle: '知识库阅览',
+  kbPathLabel: '路径',
+  kbPathPlaceholder: '输入电脑上的文件夹路径（支持相对工作区路径）',
+  kbPathRequired: '请输入知识库路径',
+  kbSave: '保存并阅览',
+  kbSaved: '知识库路径已保存，已记录待主持人同步',
+  kbSaveFailed: '保存知识库路径失败',
+  kbFiles: '文件列表',
+  kbLoadHint: '输入路径并保存后，这里会显示文件夹内的文件列表',
+  kbContentChanged: '已修改知识库部分内容',
+  kbBrowseHint: '仅供阅览：点击文件无反应；专家需要内容时由主持人读取并转交。',
+  kbNotSet: '未设置知识库路径',
   meetingDelete: '删除会议',
   meetingDeleteConfirm: '确定删除会议「{name}」？此操作不可恢复（会议文件将被永久删除）。',
   settingsShowAll: '互通（跨对话查看会议）',
@@ -224,15 +240,23 @@ export const en: Record<RoundTableKey, string> = {
   kb: 'Knowledge base',
   activity: 'Activity',
   files: 'Files',
-  kbEmpty: 'No reference materials yet (upload & search coming later)',
+  kbEmpty: 'No files in this folder yet',
   filesEmpty: 'No file outputs yet',
   noActivity: '(no contributions yet)',
   editAgents: 'Add or edit agents',
   editKb: 'Manage knowledge base',
-  agentsHintTitle: 'Edit via the captain',
-  agentsHint: 'To add, change or remove agents and their roles, just tell the captain (DeepSeek) in chat, e.g.:\n· "Add a security & compliance expert"\n· "Change the engineer role to …"\nThe captain updates the meeting through tools in real time.',
-  kbHintTitle: 'Knowledge base',
-  kbHint: 'The knowledge base will support uploading reference materials and full-text search — a later iteration. Stay tuned.',
+  kbTitle: 'Knowledge base (browse)',
+  kbPathLabel: 'Path',
+  kbPathPlaceholder: 'A folder on this computer (relative paths resolve against the workspace)',
+  kbPathRequired: 'Please enter a knowledge-base path',
+  kbSave: 'Save & browse',
+  kbSaved: 'Knowledge-base path saved; change recorded for the captain',
+  kbSaveFailed: 'Failed to save the knowledge-base path',
+  kbFiles: 'Files',
+  kbLoadHint: 'Enter a path and save to see the file list here',
+  kbContentChanged: 'I have changed some knowledge-base content',
+  kbBrowseHint: 'Browse-only: clicking a file does nothing; the captain reads and relays content to experts when needed.',
+  kbNotSet: 'No knowledge-base path set',
   meetingDelete: 'Delete meeting',
   meetingDeleteConfirm: 'Delete meeting "{name}"? This cannot be undone (the meeting files will be permanently removed).',
   settingsShowAll: 'Show meetings across conversations',

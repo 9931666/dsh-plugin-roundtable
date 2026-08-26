@@ -24,7 +24,8 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-llm'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { readdir, rm, stat } from 'node:fs/promises'
+import { dirname, extname, isAbsolute, join } from 'node:path'
 import type { EdgeDirection, UserAction } from './types.ts'
 import {
   appendUserAction,
@@ -298,6 +299,46 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             }
             return ok({ providers })
           }
+          case 'roundtable/kb.path.set': {
+            // Knowledge-base path (阅览版): validated, stored on the meeting,
+            // never reads file contents. Relative paths resolve against the
+            // meeting's own workspace.
+            const body = payload as { meetingId?: unknown; path?: unknown } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const raw = typeof body?.path === 'string' ? body.path.trim() : ''
+            if (meetingId === '' || raw === '') return fail('payload must be { meetingId, path }')
+            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+              const meeting = await readMeeting(stateRoot, meetingId)
+              if (meeting === undefined) return fail<{ path: string }>(`meeting "${meetingId}" not found`)
+              const workspace = dirname(stateRoot)
+              const resolved = isAbsolute(raw) ? raw : join(workspace, raw)
+              let info
+              try {
+                info = await stat(resolved)
+              } catch {
+                return fail<{ path: string }>(`path not found or unreadable: ${resolved}`)
+              }
+              if (!info.isDirectory()) return fail<{ path: string }>(`path is not a directory: ${resolved}`)
+              meeting.kbPath = resolved
+              await writeMeeting(stateRoot, meeting)
+              return ok({ path: resolved })
+            })
+          }
+          case 'roundtable/kb.list': {
+            // List the first level of the configured knowledge base (names,
+            // kinds, formats and sizes only — the browse-only contract).
+            const body = payload as { meetingId?: unknown } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            if (meetingId === '') return fail('payload must be { meetingId }')
+            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+              const meeting = await readMeeting(stateRoot, meetingId)
+              if (meeting === undefined) return fail<{ path: string }>(`meeting "${meetingId}" not found`)
+              const configured = meeting.kbPath ?? ''
+              if (configured === '') return ok({ path: '', configured: false, error: '', files: [] })
+              const listing = await listKbDirectory(configured)
+              return ok({ path: configured, configured: true, error: listing.error, files: listing.files })
+            })
+          }
           default:
             return fail(`unknown endpoint: ${endpoint}`)
         }
@@ -309,4 +350,58 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
       { authority: 'trusted-host' as const },
     )
   })
+}
+
+/** One knowledge-base directory entry (阅览版: name/kind/format/size only). */
+export interface KbEntry {
+  name: string
+  kind: 'file' | 'dir'
+  /** Lowercased extension without the dot (empty for directories). */
+  ext: string
+  size: number
+  mtimeMs: number
+}
+
+/**
+ * List the first level of a knowledge-base directory (browse-only): skips
+ * dot-hidden entries, caps the result at 300 items so a huge folder cannot
+ * blow up the UI, and tolerates per-entry stat failures.
+ */
+export async function listKbDirectory(dir: string): Promise<{ error: string; files: KbEntry[] }> {
+  let info
+  try {
+    info = await stat(dir)
+  } catch {
+    return { error: 'path not found or unreadable', files: [] }
+  }
+  if (!info.isDirectory()) return { error: 'not a directory', files: [] }
+  let entries
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return { error: 'directory unreadable', files: [] }
+  }
+  const files: KbEntry[] = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+    const full = join(dir, entry.name)
+    let size = 0
+    let mtimeMs = 0
+    try {
+      const entryStat = await stat(full)
+      size = entryStat.size
+      mtimeMs = entryStat.mtimeMs
+    } catch {
+      // Best-effort: an entry that vanished mid-listing still shows its name.
+    }
+    files.push({
+      name: entry.name,
+      kind: entry.isDirectory() ? 'dir' : 'file',
+      ext: entry.isDirectory() ? '' : extname(entry.name).replace(/^\./, '').toLowerCase(),
+      size,
+      mtimeMs,
+    })
+    if (files.length >= 300) break
+  }
+  return { error: '', files }
 }

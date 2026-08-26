@@ -140,6 +140,8 @@ export interface Meeting {
   budget: MeetingBudget
   /** Current debate round. */
   round: number
+  /** 知识库目录（阅览版）：主持人按需读取其中文件转交专家。空 = 未设置。 */
+  kbPath?: string
   status: MeetingStatus
   createdAt: number
   updatedAt: number

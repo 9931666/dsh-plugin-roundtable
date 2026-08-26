@@ -70,6 +70,23 @@ export interface WireMessage {
   ts: number
 }
 
+/** One knowledge-base directory entry (阅览版: name/kind/format/size only). */
+export interface WireKbEntry {
+  name: string
+  kind: 'file' | 'dir'
+  ext: string
+  size: number
+  mtimeMs: number
+}
+
+/** Knowledge-base listing returned by `roundtable/kb.list`. */
+export interface WireKbListing {
+  path: string
+  configured: boolean
+  error: string
+  files: WireKbEntry[]
+}
+
 export interface WireUtterance {
   id: string
   from: string
@@ -88,6 +105,8 @@ export interface WireMeeting {
   round: number
   workspace: string
   captainSessionId: string
+  /** 知识库目录（阅览版）；空 = 未设置。 */
+  kbPath: string
   budget: WireBudget
   nodes: WireNode[]
   edges: WireEdge[]
