@@ -66,6 +66,10 @@ const PreferenceSchema = z.object({
   maxRounds: z.natural().default(10),
   maxTokens: z.natural().default(200_000),
   showAllMeetings: z.boolean().default(true),
+  /** 专家每轮输出 token 上限（模型请求 max_tokens），0 = 不限制。 */
+  expertMaxTokens: z.natural().default(0),
+  /** 专家每轮最多提几条意见，0 = 不限制。 */
+  expertMaxOpinions: z.natural().default(0),
 })
 
 /** The model-facing usage policy: when and how to drive RoundTable. */
@@ -134,26 +138,40 @@ export function apply(ctx: Context, config: Config): void {
     text: usageSectionText(toolNames),
   })
 
+  // Settings-backed runtime preferences (mode default, budget defaults, expert
+  // answer limits). The cordis.yml config is the composition base; the user
+  // layer wins. Settings are consumed by the client settings page (via RPC)
+  // and by the tools' defaults. Declared before the tools so their lazy
+  // getExpertLimits closure can read the live scope.
+  const runtime: RoundTableRuntime = {
+    scope: undefined,
+    stateDir: resolved.stateDir,
+    fallbackPrefs: {
+      defaultMode: resolved.defaultMode,
+      maxRounds: 10,
+      maxTokens: 200_000,
+      showAllMeetings: true,
+      expertMaxTokens: 0,
+      expertMaxOpinions: 0,
+    },
+  }
+
   registerRoundTableTools(ctx, {
     stateDir: resolved.stateDir,
     memberProvider: resolved.memberProvider,
     maxNodes: resolved.maxNodes,
     defaultMode: resolved.defaultMode,
     memberMaxDepth: resolved.memberMaxDepth,
+    // Read live every spawn so a settings change applies to newly added
+    // experts without a restart.
+    getExpertLimits: () => {
+      const prefs = runtime.scope?.get() ?? runtime.fallbackPrefs
+      return {
+        maxTokens: prefs.expertMaxTokens ?? 0,
+        maxOpinions: prefs.expertMaxOpinions ?? 0,
+      }
+    },
   })
-
-  // Settings-backed runtime preferences (mode default, budget defaults). The
-  // cordis.yml config is the composition base; the user layer wins. Settings
-  // are consumed by the client settings page (via RPC) and by the tools'
-  // defaults.
-  // Fallback preferences when the settings service is absent or the namespace
-  // registration fails (e.g. a HMR reload left the old registration behind).
-  // Defaults mirror PreferenceSchema / DEFAULT_MAX_ROUNDS / DEFAULT_MAX_TOKENS.
-  const runtime: RoundTableRuntime = {
-    scope: undefined,
-    stateDir: resolved.stateDir,
-    fallbackPrefs: { defaultMode: resolved.defaultMode, maxRounds: 10, maxTokens: 200_000, showAllMeetings: true },
-  }
   ctx.inject(['settings'], (settingsCtx) => {
     try {
       const scope = settingsCtx.settings.register(SETTINGS_NAMESPACE, PreferenceSchema, {

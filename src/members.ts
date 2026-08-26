@@ -46,11 +46,27 @@ export function nodeToolRestriction(): ToolRestriction {
   return { deny: [...NODE_DENIED_TOOLS] }
 }
 
+/** Per-expert answer limits resolved from settings at spawn time. */
+export interface ExpertLimits {
+  /** Per-request output token cap (model max_tokens); 0 = unlimited. */
+  maxTokens?: number
+  /** Max opinions per round (prompt-level constraint); 0 = unlimited. */
+  maxOpinions?: number
+}
+
 /** The node's system prompt (persona): the charter plus node working rules. */
-export function nodePersona(meeting: Meeting, node: MeetingNode, stateDir: string): string {
+export function nodePersona(
+  meeting: Meeting,
+  node: MeetingNode,
+  stateDir: string,
+  limits: ExpertLimits = {},
+): string {
   const modeRule = meeting.mode === 'egalitarian'
     ? `- 协作模式为"多模型平等"：你可以用 roundtable_send_message 直接与任何其他节点（或主持人）交换意见，无需主持人中转。`
     : `- 协作模式为"主持人统筹"：你只向主持人汇报；主持人会转达其他节点的观点给你。`
+  const opinionRule = limits.maxOpinions !== undefined && limits.maxOpinions > 0
+    ? `\n- 每轮最多提出 ${limits.maxOpinions} 条意见：宁缺毋滥，只保留最有价值、直接服务于议题的要点。`
+    : ''
   return `${meeting.charter}
 
 你现在是会议"${meeting.name}"中的专家节点 ${node.key}${node.role !== undefined && node.role !== '' ? `，角色：${node.role}` : ''}。
@@ -61,7 +77,13 @@ export function nodePersona(meeting: Meeting, node: MeetingNode, stateDir: strin
 3. 会议状态文件位于 ${stateDir}/${meeting.id}/（meeting.json 与 transcript.jsonl）。你可以只读查看，但严禁直接修改；一切状态变更走 roundtable_* 工具。
 4. 你是专家，不是主持人：不要创建/移除节点、不要修改连线、不要发起人类决策、不要结束会议。
 5. 遇到无法独自决定的分歧，在发言中建议主持人触发 [需人类决策]，严禁替用户拍板。
-${modeRule}`
+${modeRule}
+
+回答限制（省 token，务必遵守）：
+- 只回答与议题直接相关的内容；无关问题一律不答，直接说明"与议题无关"。
+- 不用假设代替事实；不确定就明确说"不确定"，严禁编造。
+- 不举无关的例子；举例必须直接服务于论点。
+- 语言简洁明了，不使用华丽修辞、空话、套话；能一句话说清的不用两句话。${opinionRule}`
 }
 
 /** The initial user message delivered when the node is created. */
@@ -81,6 +103,7 @@ export async function spawnNode(
   captain: Agent,
   stateDir: string,
   signal: AbortSignal,
+  limits: ExpertLimits = {},
 ): Promise<void> {
   const provider = ctx.subagents.getProvider(config.provider)
   if (provider === undefined) {
@@ -100,17 +123,25 @@ export async function spawnNode(
   }
 
   const label = `${NODE_LABEL_PREFIX}${meeting.id}:${node.key}`
+  // Per-request output cap: model max_tokens applied to every conversation
+  // request the node makes (0/unset = the provider's own default).
+  const agentOptions: { provider?: string; model?: string; maxTokens?: number } = {}
+  if (node.provider !== undefined && node.model !== undefined) {
+    agentOptions.provider = node.provider
+    agentOptions.model = node.model
+  }
+  if (limits.maxTokens !== undefined && limits.maxTokens > 0) {
+    agentOptions.maxTokens = limits.maxTokens
+  }
   const started = await ctx.subagents.startContinuable({
     provider: config.provider,
     label,
     request: {
       prompt: [{ type: 'text', text: nodeWelcome(meeting, node) }] as ContentBlock[],
       parent: captain,
-      persona: nodePersona(meeting, node, stateDir),
+      persona: nodePersona(meeting, node, stateDir, limits),
       toolFilter: nodeToolRestriction(),
-      ...(node.provider !== undefined && node.model !== undefined
-        ? { agentOptions: { provider: node.provider, model: node.model } }
-        : {}),
+      ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
       ...(config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {}),
     },
     signal,

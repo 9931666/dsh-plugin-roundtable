@@ -71,6 +71,11 @@ export type RoundTableKey =
   | 'settingsShowAllHint'
   | 'settingsShowAllOn'
   | 'settingsShowAllOff'
+  | 'settingsLimitsTitle'
+  | 'settingsExpertMaxTokens'
+  | 'settingsExpertMaxTokensHint'
+  | 'settingsExpertMaxOpinions'
+  | 'settingsExpertMaxOpinionsHint'
   | 'pendingBadge'
   | 'manageTitle'
   | 'managePendingNote'
@@ -170,6 +175,11 @@ export const zh: Record<RoundTableKey, string> = {
   settingsShowAllHint: '开启：查看所有对话开启的圆桌会议；关闭：仅查看当前对话开启的圆桌会议。',
   settingsShowAllOn: '开启',
   settingsShowAllOff: '关闭',
+  settingsLimitsTitle: '回答限制（省 token）',
+  settingsExpertMaxTokens: '专家每轮输出上限（token）',
+  settingsExpertMaxTokensHint: '每次专家调用模型的输出 token 上限（max_tokens）；0 = 不限制（用模型默认）。',
+  settingsExpertMaxOpinions: '专家每轮最多意见数',
+  settingsExpertMaxOpinionsHint: '每轮最多提出的意见条数（提示词约束）；0 = 不限制。',
   pendingBadge: '{n} 条操作待下一轮生效',
   manageTitle: '专家管理',
   managePendingNote: '以下操作已记录，主持人将在下一轮对话中逐条执行；执行失败会保留记录。',
@@ -263,6 +273,11 @@ export const en: Record<RoundTableKey, string> = {
   settingsShowAllHint: 'On: show every round-table meeting. Off: only meetings started by this conversation.',
   settingsShowAllOn: 'On',
   settingsShowAllOff: 'Off',
+  settingsLimitsTitle: 'Answer limits (save tokens)',
+  settingsExpertMaxTokens: 'Expert output cap per round (tokens)',
+  settingsExpertMaxTokensHint: 'max_tokens per expert model request; 0 = unlimited (provider default).',
+  settingsExpertMaxOpinions: 'Max opinions per expert round',
+  settingsExpertMaxOpinionsHint: 'Opinion count cap per round (prompt constraint); 0 = unlimited.',
   pendingBadge: '{n} pending action(s), effective next round',
   manageTitle: 'Expert management',
   managePendingNote: 'The actions below are recorded; the captain executes them one by one next round. Failed actions stay recorded.',

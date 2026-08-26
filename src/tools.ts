@@ -47,6 +47,8 @@ export interface ToolsConfig {
   defaultMode: 'orchestrated' | 'egalitarian'
   /** Node delegation depth cap. */
   memberMaxDepth?: number
+  /** Live expert answer limits from settings (read at every spawn). */
+  getExpertLimits?: () => { maxTokens: number; maxOpinions: number }
 }
 
 const DEFAULT_MAX_ROUNDS = 10
@@ -322,10 +324,11 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           status: 'idle',
           joinedAt: Date.now(),
         }
+        const limits = config.getExpertLimits?.() ?? { maxTokens: 0, maxOpinions: 0 }
         await spawnNode(ctx, {
           provider: config.memberProvider,
           maxDepth: config.memberMaxDepth,
-        } as MemberRuntimeConfig, fresh, node, captain, config.stateDir, exec.signal)
+        } as MemberRuntimeConfig, fresh, node, captain, config.stateDir, exec.signal, limits)
         fresh.nodes.push(node)
         fresh.charter = buildCharter(fresh)
         try {

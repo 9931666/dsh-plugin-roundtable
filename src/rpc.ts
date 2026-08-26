@@ -50,6 +50,10 @@ export interface RoundTablePreferences {
   readonly maxTokens: number
   /** 互通开关：true = 显示所有圆桌会议；false = 仅显示当前对话开启的会议。 */
   readonly showAllMeetings: boolean
+  /** 专家每轮输出 token 上限（模型请求 max_tokens），0 = 不限制。 */
+  readonly expertMaxTokens: number
+  /** 专家每轮最多提几条意见，0 = 不限制。 */
+  readonly expertMaxOpinions: number
 }
 
 /** Holder shared between the settings fiber and the RPC fiber. */
@@ -114,6 +118,8 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               maxRounds: prefs.maxRounds,
               maxTokens: prefs.maxTokens,
               showAllMeetings: prefs.showAllMeetings,
+              expertMaxTokens: prefs.expertMaxTokens ?? 0,
+              expertMaxOpinions: prefs.expertMaxOpinions ?? 0,
             })
           }
           case 'roundtable/prefs.set': {
@@ -121,6 +127,9 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             if (patch === undefined || typeof patch !== 'object' || patch === null) {
               return fail('payload must be a preferences patch object')
             }
+            // 0 = 不限制；任何有限非负整数都接受。
+            const clampLimit = (value: unknown, fallback: number): number =>
+              typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback
             if (runtime.scope === undefined) {
               // Settings not mounted: keep an in-memory fallback so the settings
               // page stays usable; persistence resumes on the next clean start.
@@ -130,6 +139,8 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
                 maxRounds: typeof patch.maxRounds === 'number' && Number.isFinite(patch.maxRounds) && patch.maxRounds >= 1 ? Math.floor(patch.maxRounds) : base.maxRounds,
                 maxTokens: typeof patch.maxTokens === 'number' && Number.isFinite(patch.maxTokens) && patch.maxTokens >= 1000 ? Math.floor(patch.maxTokens) : base.maxTokens,
                 showAllMeetings: typeof patch.showAllMeetings === 'boolean' ? patch.showAllMeetings : base.showAllMeetings,
+                expertMaxTokens: clampLimit(patch.expertMaxTokens, base.expertMaxTokens ?? 0),
+                expertMaxOpinions: clampLimit(patch.expertMaxOpinions, base.expertMaxOpinions ?? 0),
               }
               runtime.fallbackPrefs = next
               return ok<RoundTablePreferences>({
@@ -137,6 +148,8 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
                 maxRounds: next.maxRounds,
                 maxTokens: next.maxTokens,
                 showAllMeetings: next.showAllMeetings,
+                expertMaxTokens: next.expertMaxTokens,
+                expertMaxOpinions: next.expertMaxOpinions,
               })
             }
             await runtime.scope.update(patch as object)
@@ -146,6 +159,8 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               maxRounds: next.maxRounds,
               maxTokens: next.maxTokens,
               showAllMeetings: next.showAllMeetings,
+              expertMaxTokens: next.expertMaxTokens ?? 0,
+              expertMaxOpinions: next.expertMaxOpinions ?? 0,
             })
           }
           case 'roundtable/edge.set': {

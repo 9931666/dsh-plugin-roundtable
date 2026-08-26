@@ -55,6 +55,8 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       maxRounds: prefs.maxRounds,
       maxTokens: prefs.maxTokens,
       showAllMeetings: prefs.showAllMeetings,
+      expertMaxTokens: prefs.expertMaxTokens,
+      expertMaxOpinions: prefs.expertMaxOpinions,
     })
       .then((result) => {
         setSaving(false)
@@ -132,6 +134,37 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
           <span className={styles.switchLabel}>{prefs.showAllMeetings ? t('settingsShowAllOn') : t('settingsShowAllOff')}</span>
         </label>
         <div className={styles.hint}>{t('settingsShowAllHint')}</div>
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.sectionTitle}>{t('settingsLimitsTitle')}</div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('settingsExpertMaxTokens')}</label>
+        <input
+          className={styles.input}
+          type="number"
+          min={0}
+          step={500}
+          value={prefs.expertMaxTokens}
+          onChange={(event) => {
+            const value = Math.max(0, Math.floor(Number(event.target.value) || 0))
+            patch({ expertMaxTokens: value })
+          }}
+        />
+        <div className={styles.hint}>{t('settingsExpertMaxTokensHint')}</div>
+      </div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('settingsExpertMaxOpinions')}</label>
+        <input
+          className={styles.input}
+          type="number"
+          min={0}
+          value={prefs.expertMaxOpinions}
+          onChange={(event) => {
+            const value = Math.max(0, Math.floor(Number(event.target.value) || 0))
+            patch({ expertMaxOpinions: value })
+          }}
+        />
+        <div className={styles.hint}>{t('settingsExpertMaxOpinionsHint')}</div>
       </div>
       <div className={styles.actions}>
         <button type="button" className={styles.saveButton} disabled={saving} onClick={save}>

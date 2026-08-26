@@ -123,6 +123,10 @@ export interface RoundTablePrefs {
   maxTokens: number
   /** 互通开关：true=显示所有圆桌会议；false=仅显示当前对话开启的会议。 */
   showAllMeetings: boolean
+  /** 专家每轮输出 token 上限（模型请求 max_tokens），0 = 不限制。 */
+  expertMaxTokens: number
+  /** 专家每轮最多提几条意见，0 = 不限制。 */
+  expertMaxOpinions: number
 }
 
 /**
