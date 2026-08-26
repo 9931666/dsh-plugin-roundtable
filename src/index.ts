@@ -78,6 +78,7 @@ function usageSectionText(toolNames: string): string {
 5. When experts disagree or a decision needs the user, call roundtable_request_decision with the question and option labels (the meeting pauses until the human answers). Never decide on the user's behalf.
 6. Before handing a goal to a black-box worker model (no visible reasoning, e.g. a video/image model), call roundtable_proxy_think to obtain the director template: write the [DeepSeek 代理思考] reasoning, translate exact parameters, state expectations and fallbacks, so the global thinking chain stays transparent.
 7. Watch the budget in roundtable_status. A muted (闭麦) meeting can be topped up with roundtable_set_budget. Present the consolidated result, then roundtable_close the meeting.
+8. UI edits never touch meeting state directly: expert changes made in the Web UI (add/remove expert) are recorded as pending lines in the meeting's user-actions.jsonl (one JSON per line; read the "text" field). At the start of every round check roundtable_status for pending_actions: when present, execute each line with the matching roundtable_* tool (roundtable_add_node / roundtable_remove_node / ...), and only after EVERY action succeeded call roundtable_actions_clear to empty the file. If one action fails, keep the record and explain the failure in your reply — never clear a partially-executed file.
 
 Tools: ${toolNames}`
 }
@@ -121,6 +122,7 @@ export function apply(ctx: Context, config: Config): void {
     'roundtable_summarize',
     'roundtable_request_decision',
     'roundtable_status',
+    'roundtable_actions_clear',
     'roundtable_set_budget',
     'roundtable_close',
     'roundtable_proxy_think',

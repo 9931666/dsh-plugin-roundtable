@@ -20,11 +20,21 @@
 import type { Context } from '@deepseek-ai/cordis'
 // Value import triggers `declare module 'cordis'` merge for `ctx.connection`.
 import type {} from '@deepseek-ai/dsh-client-connection'
+// Declaration merge only: makes ctx.llm visible for the model-list RPC.
+import type {} from '@deepseek-ai/dsh-llm'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
-import type { EdgeDirection } from './types.ts'
-import { meetingDirOf, readMeeting, stateRootOf, withMeetingLock, writeMeeting } from './state.ts'
+import type { EdgeDirection, UserAction } from './types.ts'
+import {
+  appendUserAction,
+  meetingDirOf,
+  readMeeting,
+  readUserActions,
+  stateRootOf,
+  withMeetingLock,
+  writeMeeting,
+} from './state.ts'
 import { buildCharter } from './charter.ts'
 
 /** RPC result envelope (mirrors the apiproxy wire shape). */
@@ -216,6 +226,77 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               await rm(meetingDirOf(stateRoot, meetingId), { recursive: true, force: true })
               return ok({ deleted: true })
             })
+          }
+          case 'roundtable/user-actions.append': {
+            // The Web UI records an expert edit here instead of touching
+            // meeting state; the captain drains the file next round.
+            const body = payload as {
+              meetingId?: unknown
+              kind?: unknown
+              nodeKey?: unknown
+              role?: unknown
+              provider?: unknown
+              model?: unknown
+              text?: unknown
+            } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const kindRaw = typeof body?.kind === 'string' ? body.kind : ''
+            if (meetingId === '' || (kindRaw !== 'add-node' && kindRaw !== 'remove-node' && kindRaw !== 'kb-path' && kindRaw !== 'other')) {
+              return fail('payload must be { meetingId, kind, text } with kind in add-node|remove-node|kb-path|other')
+            }
+            const text = typeof body?.text === 'string' ? body.text.trim() : ''
+            if (text === '') return fail('payload must include a non-empty text sentence')
+            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+              const action: UserAction = {
+                id: randomUUID(),
+                ts: Date.now(),
+                kind: kindRaw as UserAction['kind'],
+                nodeKey: typeof body?.nodeKey === 'string' && body.nodeKey.trim() !== '' ? body.nodeKey.trim() : undefined,
+                role: typeof body?.role === 'string' && body.role.trim() !== '' ? body.role.trim() : undefined,
+                provider: typeof body?.provider === 'string' && body.provider.trim() !== '' ? body.provider.trim() : undefined,
+                model: typeof body?.model === 'string' && body.model.trim() !== '' ? body.model.trim() : undefined,
+                text,
+              }
+              await appendUserAction(stateRoot, meetingId, action)
+              return ok({ id: action.id })
+            })
+          }
+          case 'roundtable/user-actions.list': {
+            const body = payload as { meetingId?: unknown } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            if (meetingId === '') return fail('payload must be { meetingId }')
+            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+              return ok<UserAction[]>(await readUserActions(stateRoot, meetingId))
+            })
+          }
+          case 'roundtable/models.list': {
+            // Model dropdown for the expert-management UI: every registered
+            // provider route plus the models it advertises (advisory catalog).
+            const llm = ctx.get('llm') as
+              | {
+                  listProviders(): { id: string; name: string }[]
+                  listModels(provider: string): Promise<{ id: string; name: string }[]>
+                }
+              | undefined
+            if (llm === undefined) return ok({ providers: [] })
+            const providers: { id: string; name: string; models: { id: string; name: string }[] }[] = []
+            for (const provider of llm.listProviders()) {
+              let models: { id: string; name: string }[] = []
+              try {
+                models = await llm.listModels(provider.id)
+              } catch {
+                // A provider may fail to enumerate its catalog (e.g. missing
+                // key); it still appears with an empty model list so the UI
+                // stays usable.
+                models = []
+              }
+              providers.push({
+                id: provider.id,
+                name: provider.name,
+                models: models.map((model) => ({ id: model.id, name: model.name })),
+              })
+            }
+            return ok({ providers })
           }
           default:
             return fail(`unknown endpoint: ${endpoint}`)

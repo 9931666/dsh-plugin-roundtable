@@ -59,24 +59,26 @@
   color: rgba(0, 0, 0, 0.55);
 }
 
+/* 会议删除按钮：固定在右栏顶部操作条（不再挤在标题行最右，窄屏也能看到）。 */
 .meetingDelete {
-  margin-left: auto;
-  width: 22px;
-  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 4px 10px;
   border-radius: 6px;
   border: 1px solid rgba(128, 128, 128, 0.35);
   background: #ffffff;
-  font-size: 12px;
-  line-height: 1;
+  color: rgba(0, 0, 0, 0.7);
   cursor: pointer;
-  padding: 0;
-  opacity: 0.65;
-  transition: opacity 120ms ease, border-color 120ms ease;
+  opacity: 0.75;
+  transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .meetingDelete:hover {
   opacity: 1;
   border-color: #c62828;
+  color: #c62828;
 }
 
 .budgetRow {
@@ -521,6 +523,36 @@
   padding-right: 2px;
 }
 
+/* 右栏顶部操作条：删除会议 + 待办徽标（固定位置，窄屏可见）。 */
+.sidebarActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+}
+
+.pendingBadge {
+  font-size: 11px;
+  color: #b26a00;
+  background: rgba(255, 193, 7, 0.14);
+  border: 1px solid rgba(255, 193, 7, 0.5);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 专家行"待移除"标记（用户已删除、主持人下一轮执行）。 */
+.agentQueuedRemove {
+  font-size: 10px;
+  color: #b26a00;
+  flex: none;
+  font-weight: 600;
+}
+
 .panel {
   flex: none;
   border: 1px solid rgba(128, 128, 128, 0.18);
@@ -905,6 +937,209 @@
   font-size: 12.5px;
   color: #b3261e;
   font-weight: 500;
+}
+
+/* ---------- expert management modal (panel "+" buttons) ---------- */
+
+.manageOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.manageModal {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manageTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.managePendingNote {
+  font-size: 11px;
+  color: #7a5b00;
+  background: rgba(255, 193, 7, 0.12);
+  border: 1px solid rgba(255, 193, 7, 0.45);
+  border-radius: 8px;
+  padding: 6px 10px;
+  line-height: 1.5;
+}
+
+.manageSectionTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.7);
+  margin-top: 2px;
+}
+
+.manageList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafafa;
+}
+
+.manageRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.managePendingAvatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: rgba(255, 193, 7, 0.25);
+  color: #b26a00;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.manageStatusTag {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.45);
+  flex: none;
+}
+
+.managePendingTag {
+  font-size: 10px;
+  color: #b26a00;
+  background: rgba(255, 193, 7, 0.15);
+  border-radius: 999px;
+  padding: 2px 8px;
+  flex: none;
+  font-weight: 600;
+}
+
+.manageRemoveBtn {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(198, 40, 40, 0.4);
+  background: #ffffff;
+  color: #c62828;
+  cursor: pointer;
+  flex: none;
+}
+
+.manageRemoveBtn:hover {
+  background: rgba(198, 40, 40, 0.08);
+}
+
+.manageForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fafafa;
+}
+
+.manageFormRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.manageLabel {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  width: 40px;
+  flex: none;
+}
+
+.manageInput {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: #ffffff;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.manageSelect {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: #ffffff;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.manageAddBtn {
+  align-self: flex-end;
+  font-size: 12px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  border: none;
+  background: #4d6bfe;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.manageAddBtn:hover {
+  background: #3b58e8;
+}
+
+.manageFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid rgba(128, 128, 128, 0.15);
+  padding-top: 10px;
+}
+
+.manageHint {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+  line-height: 1.5;
+}
+
+.manageCloseBtn {
+  font-size: 12px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  background: #ffffff;
+  color: rgba(0, 0, 0, 0.7);
+  cursor: pointer;
+  flex: none;
+}
+
+.manageCloseBtn:hover {
+  border-color: #4d6bfe;
+  color: #4d6bfe;
 }
 
 @media (prefers-reduced-motion: reduce) {

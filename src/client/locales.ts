@@ -63,6 +63,31 @@ export type RoundTableKey =
   | 'settingsShowAllHint'
   | 'settingsShowAllOn'
   | 'settingsShowAllOff'
+  | 'pendingBadge'
+  | 'manageTitle'
+  | 'managePendingNote'
+  | 'manageExisting'
+  | 'manageRemove'
+  | 'manageRemoveConfirm'
+  | 'manageRemovedSoon'
+  | 'manageQueueFailed'
+  | 'managePendingRemove'
+  | 'managePendingAdd'
+  | 'managePendingAddRole'
+  | 'manageAddTitle'
+  | 'manageName'
+  | 'manageNamePlaceholder'
+  | 'manageNameRequired'
+  | 'manageNameTaken'
+  | 'manageRole'
+  | 'manageRolePlaceholder'
+  | 'manageModel'
+  | 'manageModelInherit'
+  | 'manageAddBtn'
+  | 'manageAddedSoon'
+  | 'manageEffectiveHint'
+  | 'manageClose'
+  | 'manageNoExperts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -129,6 +154,31 @@ export const zh: Record<RoundTableKey, string> = {
   settingsShowAllHint: '开启：查看所有对话开启的圆桌会议；关闭：仅查看当前对话开启的圆桌会议。',
   settingsShowAllOn: '开启',
   settingsShowAllOff: '关闭',
+  pendingBadge: '{n} 条操作待下一轮生效',
+  manageTitle: '专家管理',
+  managePendingNote: '以下操作已记录，主持人将在下一轮对话中逐条执行；执行失败会保留记录。',
+  manageExisting: '现有专家',
+  manageRemove: '删除',
+  manageRemoveConfirm: '确定删除专家「{name}」？会议状态将在主持人下一轮执行时更新。',
+  manageRemovedSoon: '已记录：专家 {name} 将在下一轮移除',
+  manageQueueFailed: '记录操作失败',
+  managePendingRemove: '待移除',
+  managePendingAdd: '待生效',
+  managePendingAddRole: '新增专家 · 待主持人拉入',
+  manageAddTitle: '新增专家',
+  manageName: '名称',
+  manageNamePlaceholder: '如 researcher（唯一标识）',
+  manageNameRequired: '请输入专家名称',
+  manageNameTaken: '专家 {name} 已存在',
+  manageRole: '角色',
+  manageRolePlaceholder: '如 安全审查',
+  manageModel: '模型',
+  manageModelInherit: '（继承主持人默认）',
+  manageAddBtn: '加入队列',
+  manageAddedSoon: '已记录：专家 {name} 将在下一轮加入',
+  manageEffectiveHint: '改动将在主持人下一轮对话中正式起效（UI 会先行标记状态）。',
+  manageClose: '关闭',
+  manageNoExperts: '暂无专家，可通过下方表单新增',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -189,4 +239,29 @@ export const en: Record<RoundTableKey, string> = {
   settingsShowAllHint: 'On: show every round-table meeting. Off: only meetings started by this conversation.',
   settingsShowAllOn: 'On',
   settingsShowAllOff: 'Off',
+  pendingBadge: '{n} pending action(s), effective next round',
+  manageTitle: 'Expert management',
+  managePendingNote: 'The actions below are recorded; the captain executes them one by one next round. Failed actions stay recorded.',
+  manageExisting: 'Existing experts',
+  manageRemove: 'Remove',
+  manageRemoveConfirm: 'Remove expert "{name}"? The meeting state updates when the captain executes it next round.',
+  manageRemovedSoon: 'Recorded: expert {name} will be removed next round',
+  manageQueueFailed: 'Failed to record the action',
+  managePendingRemove: 'pending removal',
+  managePendingAdd: 'pending join',
+  managePendingAddRole: 'New expert · waiting for the captain',
+  manageAddTitle: 'Add expert',
+  manageName: 'Name',
+  manageNamePlaceholder: 'e.g. researcher (unique key)',
+  manageNameRequired: 'Please enter an expert name',
+  manageNameTaken: 'Expert {name} already exists',
+  manageRole: 'Role',
+  manageRolePlaceholder: 'e.g. security reviewer',
+  manageModel: 'Model',
+  manageModelInherit: '(inherit captain default)',
+  manageAddBtn: 'Queue',
+  manageAddedSoon: 'Recorded: expert {name} will join next round',
+  manageEffectiveHint: 'Changes take effect when the captain acts in the next round (the UI marks pending states right away).',
+  manageClose: 'Close',
+  manageNoExperts: 'No experts yet — add one with the form below',
 }

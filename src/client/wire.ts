@@ -39,6 +39,30 @@ export interface WirePendingDecision {
   options: string[]
 }
 
+/** One pending user action recorded by the Web UI, awaiting the captain. */
+export interface WirePendingAction {
+  id: string
+  kind: string
+  nodeKey: string
+  role: string
+  provider: string
+  model: string
+  text: string
+}
+
+/** Model entry for the expert-management dropdown (from host llm catalog). */
+export interface WireModelOption {
+  id: string
+  name: string
+}
+
+/** Provider entry with its advertised models for the expert-management dropdown. */
+export interface WireProviderOption {
+  id: string
+  name: string
+  models: WireModelOption[]
+}
+
 export interface WireMessage {
   id: string
   from: string
@@ -68,6 +92,7 @@ export interface WireMeeting {
   nodes: WireNode[]
   edges: WireEdge[]
   pendingDecisions: WirePendingDecision[]
+  pendingActions: WirePendingAction[]
   digest: string
   messages: WireMessage[]
   recent: WireUtterance[]

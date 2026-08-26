@@ -18,9 +18,11 @@ import type { Meeting, MeetingDecision, MeetingEdge, MeetingNode, MeetingUtteran
 import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
 import {
   appendUtterance,
+  clearUserActions,
   meetingDirOf,
   readMeeting,
   readTranscript,
+  readUserActions,
   sanitizeKey,
   stateRootOf,
   withMeetingLock,
@@ -755,6 +757,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       )
       const activity = nodeActivity(ctx, meeting.nodes)
       const utterances = await readTranscript(stateRoot, meeting.id)
+      const userActions = await readUserActions(stateRoot, meeting.id)
       return {
         meeting_id: meeting.id,
         meeting_name: meeting.name,
@@ -787,6 +790,15 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         pending_decisions: meeting.decisions
           .filter((decision) => decision.status === 'pending')
           .map((decision) => ({ id: decision.id, question: decision.question, options: decision.options })),
+        pending_actions: userActions.map((action) => ({
+          id: action.id,
+          kind: action.kind,
+          node_key: action.nodeKey ?? '',
+          role: action.role ?? '',
+          provider: action.provider ?? '',
+          model: action.model ?? '',
+          text: action.text,
+        })),
         recent_utterances: utterances.slice(-10).map((utterance) => ({
           speaker: utterance.nodeKey,
           kind: utterance.kind,
@@ -795,6 +807,40 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           round: utterance.round,
         })),
       }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'roundtable_actions_clear',
+    description: 'Clear the meeting\'s pending user-actions file (user-actions.jsonl) after you executed every recorded action with the roundtable_* tools. Only call this after each action was applied successfully; on a failure keep the record and explain why. Returns how many actions were cleared.',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          cleared: { type: 'integer', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Cleared ${value.cleared} pending user action(s).`,
+      }],
+    },
+    async execute(_args, exec) {
+      const captain = requireCaptain(exec)
+      const workspace = workspaceOf(captain)
+      const stateRoot = stateRootOf(workspace, config.stateDir)
+      const located = await findMeetingByCaptain(stateRoot, captain.id)
+      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
+      const cleared = await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
+        const fresh = await readMeeting(stateRoot, located.id)
+        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
+          throw new Error(`only the captain of meeting "${located.id}" may clear user actions`)
+        }
+        return clearUserActions(stateRoot, fresh.id)
+      })
+      return { cleared }
     },
   }))
 
@@ -933,6 +979,7 @@ function renderStatus(value: Record<string, unknown>): string {
   const edges = Array.isArray(value.edges) ? value.edges as Record<string, unknown>[] : []
   const budget = (value.budget ?? {}) as Record<string, unknown>
   const pending = Array.isArray(value.pending_decisions) ? value.pending_decisions as Record<string, unknown>[] : []
+  const pendingActions = Array.isArray(value.pending_actions) ? value.pending_actions as Record<string, unknown>[] : []
   const recent = Array.isArray(value.recent_utterances) ? value.recent_utterances as Record<string, unknown>[] : []
   const lines: string[] = [
     `Meeting "${String(value.meeting_name)}" (id ${String(value.meeting_id)}, mode ${String(value.mode)}, status ${String(value.status)}, round ${String(value.round)})`,
@@ -942,6 +989,7 @@ function renderStatus(value: Record<string, unknown>): string {
     `Edges (${edges.length}):`,
     ...edges.map((edge) => `  - ${String(edge.from)} → ${String(edge.to)} (${String(edge.direction)})`),
     `Pending decisions: ${pending.length === 0 ? 'none' : pending.map((decision) => `"${String(decision.question)}"`).join('; ')}`,
+    `Pending user actions (${pendingActions.length}): ${pendingActions.length === 0 ? 'none' : pendingActions.map((action) => `"${String(action.text)}"`).join('; ')}`,
     `Recent transcript:`,
     ...recent.map((utterance) => `  [R${String(utterance.round)}] ${String(utterance.speaker)}${String(utterance.to ?? '') === '' ? '' : ` → ${String(utterance.to)}`}: ${String(utterance.content)}`),
   ]

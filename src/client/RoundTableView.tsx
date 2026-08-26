@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
-import type { RpcCaller, WireEdge, WireMeeting, WireNode } from './wire.ts'
+import type { RpcCaller, WireEdge, WireMeeting, WireNode, WireProviderOption } from './wire.ts'
 import { fetchMeetings } from './wire.ts'
 import styles from './RoundTableView.module.css'
 
@@ -200,6 +200,12 @@ function sourcePrefix(captainSessionId: string): string {
   return `对话-${captainSessionId.slice(0, 4)}`
 }
 
+/** 与 host 端 sanitizeKey 一致：把显示名转成会议内稳定的节点 key。 */
+function sanitizeKey(value: string): string {
+  const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '')
+  return cleaned === '' ? '' : cleaned
+}
+
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const { sessionId, rpc, t: translate } = props
   // The `sessionId` prop is kept for slot-interface compatibility, but the
@@ -208,7 +214,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [meetings, setMeetings] = useState<WireMeeting[]>([])
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
-  const [hint, setHint] = useState<{ kind: 'agents' | 'kb'; x: number; y: number } | null>(null)
+  const [hint, setHint] = useState<{ kind: 'kb'; x: number; y: number } | null>(null)
+  const [manageOpen, setManageOpen] = useState(false)
+  const [providers, setProviders] = useState<WireProviderOption[]>([])
+  const [modelsLoaded, setModelsLoaded] = useState(false)
+  const [form, setForm] = useState<{ name: string; role: string; provider: string; model: string }>({ name: '', role: '', provider: '', model: '' })
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -435,7 +445,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     setMenu(null)
   }, [menu, refresh, rpc])
 
-  const openHint = (kind: 'agents' | 'kb', event: ReactMouseEvent<HTMLButtonElement>): void => {
+  const openHint = (kind: 'kb', event: ReactMouseEvent<HTMLButtonElement>): void => {
     event.stopPropagation()
     const rect = event.currentTarget.getBoundingClientRect()
     const width = 280
@@ -448,6 +458,110 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     if (x < 8) x = 8
     if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
     setHint({ kind, x, y })
+  }
+
+  // Pending expert edits derived from the meeting's user-actions file: keys
+  // queued for removal (still in the roster, awaiting the captain) and keys
+  // queued for addition (not yet in the roster). The UI marks both so the
+  // user sees "下一轮生效" instead of the action silently doing nothing.
+  const pendingAddKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const action of meeting?.pendingActions ?? []) {
+      if (action.kind === 'add-node' && action.nodeKey !== '') keys.add(action.nodeKey)
+    }
+    return keys
+  }, [meeting])
+  const pendingRemoveKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const action of meeting?.pendingActions ?? []) {
+      if (action.kind === 'remove-node' && action.nodeKey !== '') keys.add(action.nodeKey)
+    }
+    return keys
+  }, [meeting])
+  const pendingActionCount = (meeting?.pendingActions ?? []).length
+
+  const openManage = (): void => {
+    setManageOpen(true)
+    setModelsLoaded(false)
+    void rpc<{ providers: WireProviderOption[] }>('roundtable/models.list', {})
+      .then((result) => {
+        if (result.ok && Array.isArray(result.value.providers)) setProviders(result.value.providers)
+        setModelsLoaded(true)
+      })
+      .catch(() => setModelsLoaded(true))
+  }
+
+  const closeManage = (): void => {
+    setManageOpen(false)
+    setForm({ name: '', role: '', provider: '', model: '' })
+  }
+
+  // Queue an expert removal: only the user-actions file is written; the
+  // captain performs roundtable_remove_node next round.
+  const queueRemove = (node: WireNode): void => {
+    const confirmed = window.confirm(translate('manageRemoveConfirm').replace('{name}', node.key))
+    if (!confirmed) return
+    const text = `删除了专家 ${node.key}`
+    void rpc<unknown>('roundtable/user-actions.append', {
+      meetingId: meeting?.id,
+      kind: 'remove-node',
+      nodeKey: node.key,
+      text,
+    })
+      .then((result) => {
+        if (result.ok) {
+          setToast({ kind: 'ok', text: translate('manageRemovedSoon').replace('{name}', node.key) })
+          void refresh()
+        } else {
+          setToast({ kind: 'err', text: result.error?.message ?? translate('manageQueueFailed') })
+        }
+      })
+      .catch(() => setToast({ kind: 'err', text: translate('manageQueueFailed') }))
+  }
+
+  // Queue an expert addition: written to the user-actions file; the captain
+  // spawns the node (roundtable_add_node) next round. Empty model = inherit
+  // the captain's current route.
+  const submitAdd = (): void => {
+    if (meeting === undefined) return
+    const key = sanitizeKey(form.name)
+    if (key === '') {
+      setToast({ kind: 'err', text: translate('manageNameRequired') })
+      return
+    }
+    const exists = meeting.nodes.some((node) => node.key === key && node.status !== 'removed')
+    const queued = pendingAddKeys.has(key)
+    if (exists || queued) {
+      setToast({ kind: 'err', text: translate('manageNameTaken').replace('{name}', key) })
+      return
+    }
+    const role = form.role.trim()
+    const provider = form.provider
+    const model = form.model
+    const text = `新增了专家 ${key}${role !== '' ? `（角色：${role}）` : ''}${provider !== '' ? `，模型 ${provider}/${model}` : '，使用主持人默认模型'}`
+    void rpc<unknown>('roundtable/user-actions.append', {
+      meetingId: meeting.id,
+      kind: 'add-node',
+      nodeKey: key,
+      role,
+      provider,
+      model,
+      text,
+    })
+      .then((result) => {
+        if (result.ok) {
+          setToast({ kind: 'ok', text: translate('manageAddedSoon').replace('{name}', key) })
+          setForm({ name: '', role: '', provider: '', model: '' })
+          void refresh()
+        } else {
+          setToast({ kind: 'err', text: result.error?.message ?? translate('manageQueueFailed') })
+        }
+      })
+      .catch(() => setToast({ kind: 'err', text: translate('manageQueueFailed') }))
+  }
+
+  const handleProviderChange = (provider: string): void => {
+    setForm((previous) => ({ ...previous, provider, model: '' }))
   }
 
   if (meeting === undefined) {
@@ -640,21 +754,6 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             <span className={styles.badge}>{modeLabel}</span>
             <span className={styles.badge}>{meeting.status}</span>
             <span className={styles.round}>{translate('round')} {meeting.round}</span>
-            <button
-              type="button"
-              className={styles.meetingDelete}
-              aria-label={translate('meetingDelete')}
-              title={translate('meetingDelete')}
-              onClick={() => {
-                const confirmed = window.confirm(translate('meetingDeleteConfirm').replace('{name}', meeting.name))
-                if (!confirmed) return
-                void rpc<unknown>('roundtable/meeting.delete', { meetingId: meeting.id })
-                  .then(() => { setSelectedId(undefined); void refresh() })
-                  .catch(() => undefined)
-              }}
-            >
-              🗑
-            </button>
           </div>
           <div className={styles.budgetRow}>
             <span className={styles.budgetLabel}>{translate('roundsBudget')}</span>
@@ -741,6 +840,26 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       </div>
 
       <aside className={styles.sidebar}>
+        <div className={styles.sidebarActions}>
+          {pendingActionCount > 0 ? (
+            <span className={styles.pendingBadge}>{translate('pendingBadge').replace('{n}', String(pendingActionCount))}</span>
+          ) : null}
+          <button
+            type="button"
+            className={styles.meetingDelete}
+            aria-label={translate('meetingDelete')}
+            title={translate('meetingDelete')}
+            onClick={() => {
+              const confirmed = window.confirm(translate('meetingDeleteConfirm').replace('{name}', meeting.name))
+              if (!confirmed) return
+              void rpc<unknown>('roundtable/meeting.delete', { meetingId: meeting.id })
+                .then(() => { setSelectedId(undefined); void refresh() })
+                .catch(() => undefined)
+            }}
+          >
+            🗑 {translate('meetingDelete')}
+          </button>
+        </div>
         <section className={styles.panel}>
           <div className={styles.panelTitleRow}>
             <span className={styles.panelTitle}>{translate('agents')}</span>
@@ -749,7 +868,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               className={styles.panelAdd}
               aria-label={translate('editAgents')}
               title={translate('editAgents')}
-              onClick={(event) => openHint('agents', event)}
+              onClick={openManage}
             >
               ＋
             </button>
@@ -758,6 +877,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             {meeting.nodes.map((node) => {
               const brand = providerBrand(node.provider)
               const removed = node.status === 'removed' || node.activity === 'removed'
+              const queuedRemove = pendingRemoveKeys.has(node.key)
               return (
                 <div className={[styles.agentRow, removed ? styles.agentRowRemoved : ''].filter(Boolean).join(' ')} key={node.key}>
                   <div className={styles.agentAvatar} style={{ background: brand.color }}>
@@ -767,9 +887,13 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                     <div className={styles.agentName}>{node.key}</div>
                     <div className={styles.agentRole}>{node.role}</div>
                   </div>
-                  <span className={node.activity === 'running' ? styles.agentStatusWorking : removed ? styles.agentStatusRemoved : styles.agentStatus}>
-                    {nodeStatusLabel(node, translate)}
-                  </span>
+                  {queuedRemove ? (
+                    <span className={styles.agentQueuedRemove}>{translate('managePendingRemove')}</span>
+                  ) : (
+                    <span className={node.activity === 'running' ? styles.agentStatusWorking : removed ? styles.agentStatusRemoved : styles.agentStatus}>
+                      {nodeStatusLabel(node, translate)}
+                    </span>
+                  )}
                 </div>
               )
             })}
@@ -784,7 +908,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               className={styles.panelAdd}
               aria-label={translate('editAgents')}
               title={translate('editAgents')}
-              onClick={(event) => openHint('agents', event)}
+              onClick={openManage}
             >
               ＋
             </button>
@@ -866,15 +990,132 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           style={{ left: hint.x, top: hint.y }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className={styles.hintTitle}>
-            {hint.kind === 'agents' ? translate('agentsHintTitle') : translate('kbHintTitle')}
-          </div>
-          <div className={styles.hintBody}>
-            {hint.kind === 'agents' ? translate('agentsHint') : translate('kbHint')}
-          </div>
+          <div className={styles.hintTitle}>{translate('kbHintTitle')}</div>
+          <div className={styles.hintBody}>{translate('kbHint')}</div>
           <button type="button" className={styles.hintClose} onClick={() => setHint(null)}>
             {translate('edgeCancel')}
           </button>
+        </div>
+      ) : null}
+      {manageOpen ? (
+        <div className={styles.manageOverlay} onClick={closeManage}>
+          <div
+            className={styles.manageModal}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-label={translate('manageTitle')}
+          >
+            <div className={styles.manageTitle}>
+              {translate('manageTitle')} · {meeting.name}
+            </div>
+            {pendingActionCount > 0 ? (
+              <div className={styles.managePendingNote}>{translate('managePendingNote')}</div>
+            ) : null}
+
+            <div className={styles.manageSectionTitle}>{translate('manageExisting')}</div>
+            <div className={styles.manageList}>
+              {meeting.nodes.map((node) => {
+                const brand = providerBrand(node.provider)
+                const removed = node.status === 'removed' || node.activity === 'removed'
+                const queuedRemove = pendingRemoveKeys.has(node.key)
+                return (
+                  <div className={[styles.manageRow, removed ? styles.agentRowRemoved : ''].filter(Boolean).join(' ')} key={node.key}>
+                    <div className={styles.agentAvatar} style={{ background: brand.color }}>
+                      <span className={styles.agentAbbr}>{brand.abbr}</span>
+                    </div>
+                    <div className={styles.agentInfo}>
+                      <div className={styles.agentName}>{node.key}</div>
+                      <div className={styles.agentRole}>
+                        {node.role !== '' ? `${node.role} · ` : ''}{node.provider !== '' ? `${node.provider}/${node.model}` : '（未指定模型）'}
+                      </div>
+                    </div>
+                    {removed ? (
+                      <span className={styles.manageStatusTag}>{translate('activityRemoved')}</span>
+                    ) : queuedRemove ? (
+                      <span className={styles.managePendingTag}>{translate('managePendingRemove')}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.manageRemoveBtn}
+                        onClick={() => queueRemove(node)}
+                      >
+                        {translate('manageRemove')}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+              {meeting.nodes.length === 0 && pendingAddKeys.size === 0 ? (
+                <div className={styles.panelEmpty}>{translate('manageNoExperts')}</div>
+              ) : null}
+              {[...pendingAddKeys].map((key) => (
+                <div className={styles.manageRow} key={`pending-${key}`}>
+                  <div className={styles.managePendingAvatar}>＋</div>
+                  <div className={styles.agentInfo}>
+                    <div className={styles.agentName}>{key}</div>
+                    <div className={styles.agentRole}>{translate('managePendingAddRole')}</div>
+                  </div>
+                  <span className={styles.managePendingTag}>{translate('managePendingAdd')}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className={styles.manageSectionTitle}>{translate('manageAddTitle')}</div>
+            <div className={styles.manageForm}>
+              <div className={styles.manageFormRow}>
+                <label className={styles.manageLabel}>{translate('manageName')}</label>
+                <input
+                  className={styles.manageInput}
+                  value={form.name}
+                  placeholder={translate('manageNamePlaceholder')}
+                  onChange={(event) => setForm((previous) => ({ ...previous, name: event.target.value }))}
+                />
+              </div>
+              <div className={styles.manageFormRow}>
+                <label className={styles.manageLabel}>{translate('manageRole')}</label>
+                <input
+                  className={styles.manageInput}
+                  value={form.role}
+                  placeholder={translate('manageRolePlaceholder')}
+                  onChange={(event) => setForm((previous) => ({ ...previous, role: event.target.value }))}
+                />
+              </div>
+              <div className={styles.manageFormRow}>
+                <label className={styles.manageLabel}>{translate('manageModel')}</label>
+                <select
+                  className={styles.manageSelect}
+                  value={form.provider}
+                  onChange={(event) => handleProviderChange(event.target.value)}
+                >
+                  <option value="">{translate('manageModelInherit')}</option>
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>{provider.name || provider.id}</option>
+                  ))}
+                </select>
+                <select
+                  className={styles.manageSelect}
+                  value={form.model}
+                  disabled={form.provider === '' || !modelsLoaded}
+                  onChange={(event) => setForm((previous) => ({ ...previous, model: event.target.value }))}
+                >
+                  <option value="">{translate('manageModelInherit')}</option>
+                  {(providers.find((provider) => provider.id === form.provider)?.models ?? []).map((model) => (
+                    <option key={model.id} value={model.id}>{model.name || model.id}</option>
+                  ))}
+                </select>
+              </div>
+              <button type="button" className={styles.manageAddBtn} onClick={submitAdd}>
+                {translate('manageAddBtn')}
+              </button>
+            </div>
+
+            <div className={styles.manageFooter}>
+              <span className={styles.manageHint}>{translate('manageEffectiveHint')}</span>
+              <button type="button" className={styles.manageCloseBtn} onClick={closeManage}>
+                {translate('manageClose')}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       {menu !== null ? (

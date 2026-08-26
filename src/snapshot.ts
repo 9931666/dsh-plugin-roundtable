@@ -7,10 +7,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { listMeetings, readMeeting, readTranscript } from './state.ts'
+import { listMeetings, readMeeting, readTranscript, readUserActions } from './state.ts'
 import { aggregateUtterances } from './aggregator.ts'
 import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
-import type { Meeting, MeetingUtterance } from './types.ts'
+import type { Meeting, MeetingUtterance, UserAction } from './types.ts'
 
 /** One meeting snapshot for the Web UI. */
 export interface MeetingSnapshot {
@@ -48,6 +48,16 @@ export interface MeetingSnapshot {
     id: string
     question: string
     options: string[]
+  }[]
+  /** Pending user actions recorded by the Web UI, awaiting the captain. */
+  pendingActions: {
+    id: string
+    kind: string
+    nodeKey: string
+    role: string
+    provider: string
+    model: string
+    text: string
   }[]
   digest: string
   messages: {
@@ -152,6 +162,16 @@ export async function collectMeetingSnapshots(
       if (meeting === undefined) continue
       if (sessionFilter !== undefined && meeting.captainSessionId !== sessionFilter) continue
       const utterances = await readTranscript(root.stateRoot, meetingId)
+      const userActions = await readUserActions(root.stateRoot, meetingId)
+      const wireAction = (action: UserAction): MeetingSnapshot['pendingActions'][number] => ({
+        id: action.id,
+        kind: action.kind,
+        nodeKey: action.nodeKey ?? '',
+        role: action.role ?? '',
+        provider: action.provider ?? '',
+        model: action.model ?? '',
+        text: action.text,
+      })
       snapshots.push({
         id: meeting.id,
         name: meeting.name,
@@ -193,6 +213,7 @@ export async function collectMeetingSnapshots(
         pendingDecisions: meeting.decisions
           .filter((decision) => decision.status === 'pending')
           .map((decision) => ({ id: decision.id, question: decision.question, options: decision.options })),
+        pendingActions: userActions.map(wireAction),
         digest: aggregateUtterances(utterances),
         messages: recentDirectedMessages(utterances),
         recent: recentUtterances(utterances),

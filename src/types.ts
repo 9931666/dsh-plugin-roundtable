@@ -97,6 +97,31 @@ export interface MeetingBudget {
   usedTokens: number
 }
 
+/**
+ * One pending user action recorded by the Web UI (`user-actions.jsonl`).
+ *
+ * The UI never mutates meeting state directly: an expert edit (add/remove)
+ * is appended here as a pending action, the captain (主持人) drains the file
+ * next round through `roundtable_*` tools, and only clears it after every
+ * line was executed successfully. Empty file = no pending work.
+ */
+export interface UserAction {
+  id: string
+  ts: number
+  /** What the captain must do: add an expert node / remove one / other. */
+  kind: 'add-node' | 'remove-node' | 'kb-path' | 'other'
+  /** Target node key when the action concerns one expert. */
+  nodeKey?: string
+  /** Role text captured for an add-node action. */
+  role?: string
+  /** Provider route captured for an add-node action (empty = inherit captain). */
+  provider?: string
+  /** Model captured for an add-node action (empty = inherit captain). */
+  model?: string
+  /** Human-readable sentence, e.g. "删除了专家 researcher". */
+  text: string
+}
+
 /** The full durable meeting record (transcript lives in transcript.jsonl). */
 export interface Meeting {
   /** Sanitized stable id; the meeting directory name. */

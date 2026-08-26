@@ -11,7 +11,7 @@
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import type { Meeting, MeetingUtterance } from './types.ts'
+import type { Meeting, MeetingUtterance, UserAction } from './types.ts'
 
 /** Stable directory id from a display name (keeps CJK, lowercases latin). */
 export function sanitizeKey(value: string): string {
@@ -114,4 +114,40 @@ export async function listMeetings(stateRoot: string): Promise<string[]> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
   }
+}
+
+/** Append one user action to the meeting's `user-actions.jsonl` (JSONL). */
+export async function appendUserAction(stateRoot: string, meetingId: string, action: UserAction): Promise<void> {
+  const dir = meetingDirOf(stateRoot, meetingId)
+  await mkdir(dir, { recursive: true })
+  await appendFile(join(dir, 'user-actions.jsonl'), JSON.stringify(action) + '\n', 'utf8')
+}
+
+/** Read every pending user action, skipping torn tails and malformed lines. */
+export async function readUserActions(stateRoot: string, meetingId: string): Promise<UserAction[]> {
+  try {
+    const raw = await readFile(join(stateRoot, meetingId, 'user-actions.jsonl'), 'utf8')
+    const out: UserAction[] = []
+    for (const line of raw.split(/\r?\n/)) {
+      if (line.trim() === '') continue
+      try {
+        out.push(JSON.parse(line) as UserAction)
+      } catch {
+        // Torn or malformed tail line: ignore and keep reading.
+      }
+    }
+    return out
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
+
+/** Clear every pending user action; returns how many were dropped. */
+export async function clearUserActions(stateRoot: string, meetingId: string): Promise<number> {
+  const dir = meetingDirOf(stateRoot, meetingId)
+  await mkdir(dir, { recursive: true })
+  const before = await readUserActions(stateRoot, meetingId)
+  await writeFile(join(dir, 'user-actions.jsonl'), '', 'utf8')
+  return before.length
 }
