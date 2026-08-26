@@ -157,6 +157,15 @@ export async function collectMeetingSnapshots(
   roots: readonly { workspace: string; stateRoot: string }[],
   sessionFilter?: string,
 ): Promise<MeetingSnapshot[]> {
+  const wireAction = (action: UserAction): MeetingSnapshot['pendingActions'][number] => ({
+    id: action.id,
+    kind: action.kind,
+    nodeKey: action.nodeKey ?? '',
+    role: action.role ?? '',
+    provider: action.provider ?? '',
+    model: action.model ?? '',
+    text: action.text,
+  })
   const snapshots: MeetingSnapshot[] = []
   for (const root of roots) {
     for (const meetingId of await listMeetings(root.stateRoot)) {
@@ -165,15 +174,6 @@ export async function collectMeetingSnapshots(
       if (sessionFilter !== undefined && meeting.captainSessionId !== sessionFilter) continue
       const utterances = await readTranscript(root.stateRoot, meetingId)
       const userActions = await readUserActions(root.stateRoot, meetingId)
-      const wireAction = (action: UserAction): MeetingSnapshot['pendingActions'][number] => ({
-        id: action.id,
-        kind: action.kind,
-        nodeKey: action.nodeKey ?? '',
-        role: action.role ?? '',
-        provider: action.provider ?? '',
-        model: action.model ?? '',
-        text: action.text,
-      })
       snapshots.push({
         id: meeting.id,
         name: meeting.name,

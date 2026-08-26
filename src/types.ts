@@ -13,7 +13,7 @@
 export type MeetingMode = 'orchestrated' | 'egalitarian'
 
 /** Meeting lifecycle. `muted` = budget exceeded (闭麦); user may top up or close. */
-export type MeetingStatus = 'active' | 'paused' | 'muted' | 'ended' | 'archived'
+export type MeetingStatus = 'active' | 'muted' | 'ended' | 'archived'
 
 /** One expert node's lifecycle status. */
 export type NodeStatus = 'idle' | 'working' | 'ready' | 'removed'

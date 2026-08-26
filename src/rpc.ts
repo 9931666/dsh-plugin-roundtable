@@ -66,11 +66,6 @@ export interface RoundTableRuntime {
 
 const ENDPOINT_PREFIX = 'roundtable/'
 
-/** Test whether one endpoint belongs to this plugin. */
-export function ownsEndpoint(endpoint: string): boolean {
-  return endpoint.startsWith(ENDPOINT_PREFIX)
-}
-
 function ok<T>(value: T): RpcResult<T> {
   return { ok: true, value }
 }
@@ -90,8 +85,8 @@ interface RpcConnection {
   }
 }
 
-/** Run one edge mutation under the meeting lock, resolving its state root first. */
-async function withEdgeLock<T>(
+/** Run one meeting mutation under the meeting lock, resolving its state root first. */
+async function withMeetingRpcLock<T>(
   runtime: RoundTableRuntime,
   meetingId: string,
   operation: (stateRoot: string) => Promise<RpcResult<T>>,
@@ -173,7 +168,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               return fail('direction must be "forward" or "bidirectional"')
             }
             const direction: EdgeDirection = directionRaw
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return fail<{ direction: string }>(`meeting "${meetingId}" not found`)
               const edge = meeting.edges.find((candidate) => candidate.id === edgeId)
@@ -191,7 +186,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             const to = typeof body?.to === 'string' ? body.to.trim() : ''
             if (meetingId === '' || from === '' || to === '') return fail('payload must be { meetingId, from, to, direction }')
             const direction: EdgeDirection = body?.direction === 'bidirectional' ? 'bidirectional' : 'forward'
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return fail<Record<string, string>>(`meeting "${meetingId}" not found`)
               const valid = (key: string): boolean => key === 'captain' || key === 'aggregator'
@@ -214,7 +209,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             const edgeId = typeof body?.edgeId === 'string' ? body.edgeId : ''
             if (meetingId === '' || edgeId === '') return fail('payload must be { meetingId, edgeId }')
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return fail<{ removed: boolean }>(`meeting "${meetingId}" not found`)
               const before = meeting.edges.length
@@ -228,7 +223,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             const body = payload as { meetingId?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             if (meetingId === '') return fail('payload must be { meetingId }')
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return ok({ deleted: false })
               // Best-effort: interrupt the meeting's expert subagents first so
@@ -262,7 +257,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             }
             const text = typeof body?.text === 'string' ? body.text.trim() : ''
             if (text === '') return fail('payload must include a non-empty text sentence')
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const action: UserAction = {
                 id: randomUUID(),
                 ts: Date.now(),
@@ -281,7 +276,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             const body = payload as { meetingId?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             if (meetingId === '') return fail('payload must be { meetingId }')
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               return ok<UserAction[]>(await readUserActions(stateRoot, meetingId))
             })
           }
@@ -322,7 +317,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             const raw = typeof body?.path === 'string' ? body.path.trim() : ''
             if (meetingId === '' || raw === '') return fail('payload must be { meetingId, path }')
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return fail<{ path: string }>(`meeting "${meetingId}" not found`)
               const workspace = dirname(stateRoot)
@@ -345,7 +340,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             const body = payload as { meetingId?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             if (meetingId === '') return fail('payload must be { meetingId }')
-            return withEdgeLock(runtime, meetingId, async (stateRoot) => {
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return fail<{ path: string }>(`meeting "${meetingId}" not found`)
               const configured = meeting.kbPath ?? ''

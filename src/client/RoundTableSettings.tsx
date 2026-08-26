@@ -91,7 +91,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         </select>
         <div className={styles.hint}>{t('settingsDefaultModeHint')}</div>
         {prefs.defaultMode === 'egalitarian' ? (
-          <div className={styles.warning}>{t('settingsDefaultModeHint')}</div>
+          <div className={styles.warning}>{t('settingsEgalitarianWarning')}</div>
         ) : null}
       </div>
       <div className={styles.field}>

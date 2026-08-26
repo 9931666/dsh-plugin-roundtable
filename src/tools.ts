@@ -33,7 +33,6 @@ import { aggregateUtterances } from './aggregator.ts'
 import { proxyThinkingPrompt } from './proxy-thinking.ts'
 import { beginRound, ensureActive, estimateTokens, MeetingMutedError } from './budget.ts'
 import { deliverToNode, interruptNode, nodeActivity, spawnNode, steerCaptain, type MemberRuntimeConfig } from './members.ts'
-import { appendMeetingEvent } from './events.ts'
 
 /** Resolved plugin config consumed by the tools. */
 export interface ToolsConfig {
@@ -105,6 +104,38 @@ async function findMeetingByParticipant(stateRoot: string, agentId: string): Pro
     }
   }
   return undefined
+}
+
+/** Locate the meeting the captain leads, or fail loudly (captain-tool boilerplate). */
+async function locateCaptainMeeting(stateRoot: string, captainId: string): Promise<Meeting> {
+  const located = await findMeetingByCaptain(stateRoot, captainId)
+  if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
+  return located
+}
+
+/** Locate the meeting the caller participates in, or fail loudly. */
+async function locateParticipantMeeting(stateRoot: string, agentId: string): Promise<Meeting> {
+  const located = await findMeetingByParticipant(stateRoot, agentId)
+  if (located === undefined) throw new Error('you do not belong to any active meeting yet')
+  return located
+}
+
+/** Lock + captain-permission gate + active check: the inner captain-tool boilerplate. */
+async function withCaptainLock<T>(
+  stateRoot: string,
+  meetingId: string,
+  captainId: string,
+  action: string,
+  operation: (fresh: Meeting) => Promise<T>,
+): Promise<T> {
+  return withMeetingLock(meetingLockKey(stateRoot, meetingId), async () => {
+    const fresh = await readMeeting(stateRoot, meetingId)
+    if (fresh === undefined || fresh.captainSessionId !== captainId) {
+      throw new Error(`only the captain of meeting "${meetingId}" may ${action}`)
+    }
+    ensureActive(fresh)
+    return operation(fresh)
+  })
 }
 
 type ParticipantIdentity =
@@ -246,11 +277,6 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           }
           meeting.charter = buildCharter(meeting)
           await writeMeeting(stateRoot, meeting)
-          await appendMeetingEvent(captain, 'roundtable/meeting-created', {
-            meetingId: meeting.id,
-            meetingName: meeting.name,
-            mode: meeting.mode,
-          })
           return {
             meeting_id: meeting.id,
             meeting_name: meeting.name,
@@ -298,12 +324,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         throw new Error('you are not leading any meeting — call roundtable_create first')
       }
       const meetingId = located.id
-      const created = await withMeetingLock(meetingLockKey(stateRoot, meetingId), async () => {
-        const fresh = await readMeeting(stateRoot, meetingId)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${meetingId}" may add nodes`)
-        }
-        ensureActive(fresh)
+      const created = await withCaptainLock(stateRoot, meetingId, captain.id, 'add nodes', async (fresh) => {
         const nodeKey = sanitizeKey(String(args.name ?? '').trim())
         if (nodeKey === '') throw new Error('node name must not be empty')
         if (nodeKey === CAPTAIN_KEY || nodeKey === AGGREGATOR_KEY) {
@@ -337,11 +358,6 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           if (node.id !== '') interruptNode(ctx, captain, node.id)
           throw error
         }
-        await appendMeetingEvent(captain, 'roundtable/node-added', {
-          meetingId: fresh.id,
-          nodeKey: node.key,
-          nodeId: node.id,
-        })
         return {
           node_name: node.key,
           node_id: node.id,
@@ -376,23 +392,15 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByCaptain(stateRoot, captain.id)
-      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
-      const removed = await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
-        const fresh = await readMeeting(stateRoot, located.id)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${located.id}" may remove nodes`)
-        }
-        ensureActive(fresh)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      const removed = await withCaptainLock(stateRoot, located.id, captain.id, 'remove nodes', async (fresh) => {
         const node = requireNode(fresh, String(args.name ?? ''))
         node.status = 'removed'
         const before = fresh.edges.length
         fresh.edges = fresh.edges.filter((edge) => edge.from !== node.key && edge.to !== node.key)
         fresh.charter = buildCharter(fresh)
         await writeMeeting(stateRoot, fresh)
-        await appendMeetingEvent(captain, 'roundtable/node-removed', { meetingId: fresh.id, nodeKey: node.key })
         return { node, removedEdges: before - fresh.edges.length }
       })
       if (removed.node.id !== '') interruptNode(ctx, captain, removed.node.id)
@@ -426,16 +434,9 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByCaptain(stateRoot, captain.id)
-      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
-      return withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
-        const fresh = await readMeeting(stateRoot, located.id)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${located.id}" may edit channels`)
-        }
-        ensureActive(fresh)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'edit channels', async (fresh) => {
         const from = String(args.from ?? '').trim()
         const to = String(args.to ?? '').trim()
         if (!validEndpoint(fresh, from)) throw new Error(`unknown endpoint "${from}"`)
@@ -449,7 +450,6 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         fresh.edges.push(edge)
         fresh.charter = buildCharter(fresh)
         await writeMeeting(stateRoot, fresh)
-        await appendMeetingEvent(captain, 'roundtable/edge-set', { meetingId: fresh.id, from, to, direction })
         return { edge_id: edge.id, from, to, direction }
       })
     },
@@ -475,16 +475,9 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByCaptain(stateRoot, captain.id)
-      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
-      return withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
-        const fresh = await readMeeting(stateRoot, located.id)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${located.id}" may edit channels`)
-        }
-        ensureActive(fresh)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'edit channels', async (fresh) => {
         const before = fresh.edges.length
         if (args.edge_id !== undefined) {
           fresh.edges = fresh.edges.filter((edge) => edge.id !== String(args.edge_id))
@@ -526,10 +519,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByParticipant(stateRoot, caller.id)
-      if (located === undefined) throw new Error('you do not belong to any active meeting yet')
+      const stateRoot = stateRootOf(workspaceOf(caller), config.stateDir)
+      const located = await locateParticipantMeeting(stateRoot, caller.id)
       const recorded = await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
         const { meeting, identity } = await requireFreshParticipant(stateRoot, located.id, caller.id)
         const content = String(args.content ?? '').trim()
@@ -571,10 +562,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByParticipant(stateRoot, caller.id)
-      if (located === undefined) throw new Error('you do not belong to any active meeting yet')
+      const stateRoot = stateRootOf(workspaceOf(caller), config.stateDir)
+      const located = await locateParticipantMeeting(stateRoot, caller.id)
       const content = String(args.content ?? '').trim()
       if (content === '') throw new Error('content must not be empty')
       const to = String(args.to ?? '').trim()
@@ -629,10 +618,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByParticipant(stateRoot, caller.id)
-      if (located === undefined) throw new Error('you do not belong to any active meeting yet')
+      const stateRoot = stateRootOf(workspaceOf(caller), config.stateDir)
+      const located = await locateParticipantMeeting(stateRoot, caller.id)
       const utterances = await readTranscript(stateRoot, located.id)
       return {
         digest: aggregateUtterances(utterances),
@@ -669,10 +656,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByCaptain(stateRoot, captain.id)
-      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
       const question = String(args.question ?? '').trim()
       if (question === '') throw new Error('question must not be empty')
       const optionLabels = Array.isArray(args.options)
@@ -685,15 +670,10 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         status: 'pending',
         ts: Date.now(),
       }
-      await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
-        const fresh = await readMeeting(stateRoot, located.id)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${located.id}" may request decisions`)
-        }
+      await withCaptainLock(stateRoot, located.id, captain.id, 'request decisions', async (fresh) => {
         fresh.decisions.push(decision)
         await writeMeeting(stateRoot, fresh)
       })
-      await appendMeetingEvent(captain, 'roundtable/decision-requested', { meetingId: located.id, decisionId: decision.id })
 
       const userQuestions = ctx.get('userQuestions') as
         | { ask(request: { questions: { id: string; question: string; header?: string; options?: { label: string; description?: string }[] }[]; agent?: Agent; signal?: AbortSignal }): Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }> }
@@ -731,7 +711,6 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         }
         await writeMeeting(stateRoot, fresh)
       })
-      await appendMeetingEvent(captain, 'roundtable/decision-resolved', { meetingId: located.id, decisionId: decision.id })
       return {
         decision_id: decision.id,
         chosen: chosen ?? '(no selection)',
@@ -750,10 +729,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByParticipant(stateRoot, caller.id)
-      if (located === undefined) throw new Error('you do not belong to any active meeting yet')
+      const stateRoot = stateRootOf(workspaceOf(caller), config.stateDir)
+      const located = await locateParticipantMeeting(stateRoot, caller.id)
       const { meeting, identity } = await withMeetingLock(
         meetingLockKey(stateRoot, located.id),
         () => requireFreshParticipant(stateRoot, located.id, caller.id),
@@ -833,15 +810,9 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByCaptain(stateRoot, captain.id)
-      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
-      const cleared = await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
-        const fresh = await readMeeting(stateRoot, located.id)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${located.id}" may clear user actions`)
-        }
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      const cleared = await withCaptainLock(stateRoot, located.id, captain.id, 'clear user actions', async (fresh) => {
         return clearUserActions(stateRoot, fresh.id)
       })
       return { cleared }
@@ -872,15 +843,9 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByCaptain(stateRoot, captain.id)
-      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
-      return withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
-        const fresh = await readMeeting(stateRoot, located.id)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${located.id}" may change the budget`)
-        }
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'change the budget', async (fresh) => {
         if (typeof args.max_rounds === 'number') fresh.budget.maxRounds = Math.floor(args.max_rounds)
         if (typeof args.max_tokens === 'number') fresh.budget.maxTokens = Math.floor(args.max_tokens)
         if (fresh.status === 'muted') {
@@ -911,22 +876,15 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
-      const stateRoot = stateRootOf(workspace, config.stateDir)
-      const located = await findMeetingByCaptain(stateRoot, captain.id)
-      if (located === undefined) throw new Error('you are not leading any meeting — call roundtable_create first')
-      const nodes = await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
-        const fresh = await readMeeting(stateRoot, located.id)
-        if (fresh === undefined || fresh.captainSessionId !== captain.id) {
-          throw new Error(`only the captain of meeting "${located.id}" may close it`)
-        }
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      const nodes = await withCaptainLock(stateRoot, located.id, captain.id, 'close it', async (fresh) => {
         const roster = fresh.nodes.map((node) => ({ ...node }))
         for (const node of fresh.nodes) {
           if (node.status !== 'removed') node.status = 'removed'
         }
         fresh.status = 'ended'
         await writeMeeting(stateRoot, fresh)
-        await appendMeetingEvent(captain, 'roundtable/meeting-closed', { meetingId: fresh.id })
         return roster
       })
       for (const node of nodes) {

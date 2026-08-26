@@ -21,20 +21,17 @@ export type RoundTableKey =
   | 'pendingDecisionOptions'
   | 'gatewayDigest'
   | 'noDigest'
-  | 'edgeForward'
-  | 'edgeBidirectional'
   | 'edgeSetForward'
   | 'edgeSetBidirectional'
   | 'edgeRemove'
-  | 'edgeCancel'
   | 'activityRunning'
   | 'activityIdle'
   | 'activityReady'
   | 'activityRemoved'
-  | 'nodeRole'
   | 'settingsNav'
   | 'settingsDefaultMode'
   | 'settingsDefaultModeHint'
+  | 'settingsEgalitarianWarning'
   | 'settingsMaxRounds'
   | 'settingsMaxTokens'
   | 'settingsSave'
@@ -125,20 +122,17 @@ export const zh: Record<RoundTableKey, string> = {
   pendingDecisionOptions: '选项',
   gatewayDigest: '汇聚网关 · 结构化摘要',
   noDigest: '（暂无发言）',
-  edgeForward: '单向通道',
-  edgeBidirectional: '双向通道',
   edgeSetForward: '设为单向通道',
   edgeSetBidirectional: '设为双向通道',
   edgeRemove: '删除连线',
-  edgeCancel: '取消',
   activityRunning: '工作中',
   activityIdle: '空闲',
   activityReady: '待唤醒',
   activityRemoved: '已退出',
-  nodeRole: '角色',
   settingsNav: '圆桌会议',
   settingsDefaultMode: '默认协作模式',
   settingsDefaultModeHint: '主持人统筹：一切经由主持人转达；多模型平等：专家互相直达辩论，超预算自动闭麦（选择它会弹出安全限制）。',
+  settingsEgalitarianWarning: '已选择「多模型平等」：专家互相直达、无主持人中转，请务必设置足够的轮数/Token 上限，超限将自动闭麦。',
   settingsMaxRounds: '默认最大轮数',
   settingsMaxTokens: '默认 Token 预算',
   settingsSave: '保存',
@@ -223,20 +217,17 @@ export const en: Record<RoundTableKey, string> = {
   pendingDecisionOptions: 'Options',
   gatewayDigest: 'Aggregation gateway · structured digest',
   noDigest: '(no contributions yet)',
-  edgeForward: 'Forward channel',
-  edgeBidirectional: 'Bidirectional channel',
   edgeSetForward: 'Set forward',
   edgeSetBidirectional: 'Set bidirectional',
   edgeRemove: 'Remove edge',
-  edgeCancel: 'Cancel',
   activityRunning: 'working',
   activityIdle: 'idle',
   activityReady: 'ready',
   activityRemoved: 'removed',
-  nodeRole: 'Role',
   settingsNav: 'RoundTable',
   settingsDefaultMode: 'Default collaboration mode',
   settingsDefaultModeHint: 'Orchestrated: the captain relays everything. Egalitarian: experts debate each other directly and the budget mutes the meeting when exceeded (a warning asks for safety limits).',
+  settingsEgalitarianWarning: 'Egalitarian selected: experts talk to each other directly with no captain relay — set generous round/token caps; exceeding them mutes the meeting.',
   settingsMaxRounds: 'Default max rounds',
   settingsMaxTokens: 'Default token budget',
   settingsSave: 'Save',

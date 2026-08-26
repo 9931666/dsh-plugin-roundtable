@@ -38,8 +38,3 @@ export function aggregateUtterances(utterances: readonly MeetingUtterance[], max
   const text = `[汇聚网关·交锋摘要]\n${lines.join('\n\n') || '（暂无发言）'}`
   return text.length > maxLength ? `${text.slice(0, maxLength)}\n…(截断)` : text
 }
-
-/** Count utterances accepted into the digest (speech-like only). */
-export function speechCount(utterances: readonly MeetingUtterance[]): number {
-  return utterances.filter((utterance) => utterance.kind === 'speech' || utterance.kind === 'proxy-thinking').length
-}
