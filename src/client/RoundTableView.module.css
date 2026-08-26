@@ -383,6 +383,16 @@
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22);
 }
 
+/* 厂商 logo 图：圆形裁切 + contain 防切边，品牌色底垫在透明图后面。 */
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: contain;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
 .avatarAbbr {
   color: #ffffff;
   font-size: 10px;
