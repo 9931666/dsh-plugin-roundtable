@@ -51,22 +51,22 @@ interface DragState {
 const NODE_RADIUS = 34
 
 /** Provider → brand avatar (logo image if bundled, else abbreviation + brand color). */
-const PROVIDER_BRAND: Array<{ key: string; match: RegExp; abbr: string; color: string }> = [
+const PROVIDER_BRAND: Array<{ key: string; match: RegExp; abbr: string; color: string; dark?: boolean }> = [
   { key: 'deepseek', match: /deepseek/i, abbr: 'DS', color: '#4D6BFE' },
   { key: 'glm', match: /glm|zhipu|z\.ai|智谱/i, abbr: 'GLM', color: '#3859FF' },
   { key: 'openai', match: /openai|gpt/i, abbr: 'GPT', color: '#10A37F' },
   { key: 'claude', match: /anthropic|claude/i, abbr: 'CLD', color: '#D97757' },
   { key: 'qwen', match: /qwen|通义/i, abbr: 'QW', color: '#6E56CF' },
-  { key: 'kimi', match: /moonshot|kimi/i, abbr: 'KM', color: '#16181D' },
+  { key: 'kimi', match: /moonshot|kimi/i, abbr: 'KM', color: '#16181D', dark: true },
   { key: 'gemini', match: /gemini/i, abbr: 'GM', color: '#4285F4' },
   { key: 'minimax', match: /minimax/i, abbr: 'MX', color: '#0A0A0A' },
 ]
 
 /** Brand avatar for a provider: bundled logo (data URL) when available, else abbr + color. */
-function providerBrand(provider: string): { abbr: string; color: string; logo?: string } {
+function providerBrand(provider: string): { abbr: string; color: string; logo?: string; dark?: boolean } {
   for (const brand of PROVIDER_BRAND) {
     if (!brand.match.test(provider)) continue
-    return { abbr: brand.abbr, color: brand.color, logo: BRAND_LOGOS[brand.key] }
+    return { abbr: brand.abbr, color: brand.color, logo: BRAND_LOGOS[brand.key], dark: brand.dark }
   }
   const abbr = provider.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '?'
   return { abbr, color: '#8a8a8a' }
@@ -218,10 +218,14 @@ function formatKbSize(bytes: number): string {
 }
 
 /** 品牌头像：有 logo 图片则圆形显示，否则品牌色块 + 缩写。 */
-function brandAvatar(brand: { abbr: string; color: string; logo?: string }, size: 'node' | 'list'): JSX.Element {
+function brandAvatar(brand: { abbr: string; color: string; logo?: string; dark?: boolean }, size: 'node' | 'list'): JSX.Element {
   const cls = size === 'node' ? styles.avatar : styles.agentAvatar
+  // 透明 logo 垫白底保证彩色 logo 清晰；深色 logo（Kimi/MiniMax 深色系）垫深底避免白字隐形。
+  const background = brand.logo === undefined
+    ? brand.color
+    : (brand.dark ? '#16181D' : '#ffffff')
   return (
-    <div className={cls} style={brand.logo === undefined ? { background: brand.color } : undefined}>
+    <div className={cls} style={{ background }}>
       {brand.logo !== undefined
         ? <img className={styles.avatarImg} src={brand.logo} alt={brand.abbr} title={brand.abbr} />
         : size === 'node'
