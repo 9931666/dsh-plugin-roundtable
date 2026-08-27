@@ -5,8 +5,12 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
+  <img src="https://img.shields.io/badge/version-v0.2.0-blue" alt="v0.2.0">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
+
+<!-- 主图占位：把「圆桌会议」Tab 截图放到 docs/screenshot.png 后启用下面这行 -->
+<!-- <p align="center"><img src="docs/screenshot.png" alt="圆桌会议拓扑图" width="720"></p> -->
 
 ## 一句话
 
@@ -26,6 +30,12 @@
 | **预算熔断** | 轮数与 Token 双预算，超限自动「闭麦」，可补预算继续或汇总收场。 |
 | **全局协作总纲** | 会议启动即注入四段式《全局协作总纲》（目标 / 角色边界 / 协作协议 / 安全红线）到每个专家节点。 |
 | **持久化** | 会议状态落盘于 `<workspace>/.roundtable/`，重启后可恢复拓扑与历史。 |
+| **厂商 Logo 头像**（v0.2.0） | 专家头像显示 DeepSeek / GLM / Gemini / Claude / Kimi / MiniMax 真实 Logo（base64 内联、离线可用），未收录厂商自动回退缩写。 |
+| **专家管理界面**（v0.2.0） | 右栏「＋」直接加/删专家、从模型下拉选厂商（DeepSeek / GLM / 千问 / Kimi / MiniMax…）；改动记入 `user-actions.jsonl`，主持人下一轮自动执行，UI 与主持人认知同步。 |
+| **知识库（阅览版）**（v0.2.0） | 填一个文件夹路径即列出文件与格式；专家需要资料时由主持人按需读取转交，不整库搬运，避免 Token 双倍消耗。 |
+| **回答限制**（v0.2.0） | 专家每轮输出上限（模型 `max_tokens`）+ 每轮最多意见数；专家 prompt 内置简洁约束（只答相关 / 不用假设 / 不举无关例子 / 无修辞）。 |
+| **会议删除**（v0.2.0） | 右栏一键删除会议（确认弹窗 + 磁盘彻底删除 + 连带清理专家子代理）。 |
+| **互通开关**（v0.2.0） | 设置里可只显示当前对话开的会议，或查看工作区全部会议。 |
 
 ## 安装
 
@@ -90,7 +100,15 @@ dsh plugin --profile web add @huanlin/dsh-plugin-roundtable
     promptSectionOrder: 116      # 使用策略提示段顺序
 ```
 
-运行时偏好（默认模式与预算默认值）在「设置 → 圆桌会议」中修改，持久化到 `settings.yaml`。
+运行时偏好（默认模式与预算默认值、专家回答限制）在「设置 → 圆桌会议」中修改，持久化到 `settings.yaml`：
+
+| 偏好 | 默认 | 说明 |
+| --- | --- | --- |
+| 默认协作模式 | `orchestrated` | 主持人统筹 / 多模型平等 |
+| 最大轮数 / 最大 Token | 10 / 200000 | 会议预算，超限闭麦 |
+| 互通开关 | 开 | 只看当前对话会议 / 看全部 |
+| **专家每轮输出上限（token）** | 0（不限制） | 专家组模型 `max_tokens` |
+| **专家每轮最多意见数** | 0（不限制） | 专家 prompt 约束 |
 
 ## 工具一览（模型可见协议）
 
@@ -103,7 +121,8 @@ dsh plugin --profile web add @huanlin/dsh-plugin-roundtable
 | `roundtable_send_message` | 直达消息（模式 B 专家互辩） |
 | `roundtable_summarize` | 拉取汇聚网关结构化摘要 |
 | `roundtable_request_decision` | 暂停会议、请求人类决策 |
-| `roundtable_status` | 会议全景（节点活动、连线、预算、待决策） |
+| `roundtable_status` | 会议全景（节点活动、连线、预算、待决策、待办行为记录） |
+| `roundtable_actions_clear` | 清空用户的待办行为记录（UI 改专家后主持人执行完清空） |
 | `roundtable_set_budget` | 调整预算 / 闭麦恢复 |
 | `roundtable_proxy_think` | 代理思考：导演为黑盒模型做思考铺垫 + 参数翻译 |
 | `roundtable_close` | 结束会议（记录保留） |
