@@ -88,6 +88,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         >
           <option value="orchestrated">{t('modeOrchestrated')}</option>
           <option value="egalitarian">{t('modeEgalitarian')}</option>
+          <option value="redteam">{t('modeRedteam')}</option>
         </select>
         <div className={styles.hint}>{t('settingsDefaultModeHint')}</div>
         {prefs.defaultMode === 'egalitarian' ? (

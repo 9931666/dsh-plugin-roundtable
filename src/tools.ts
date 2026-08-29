@@ -46,7 +46,7 @@ export interface ToolsConfig {
   /** Meeting size cap (nodes). */
   maxNodes: number
   /** Default collaboration mode. */
-  defaultMode: 'orchestrated' | 'egalitarian'
+  defaultMode: 'orchestrated' | 'egalitarian' | 'redteam'
   /** Node delegation depth cap. */
   memberMaxDepth?: number
   /** Live expert answer limits from settings (read at every spawn). */
@@ -214,8 +214,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       goal: { type: 'string', required: true, description: 'Meeting background and core goal (charter section one) — the ultimate deliverable.' },
       mode: {
         type: 'string',
-        enum: ['orchestrated', 'egalitarian'],
-        description: `Collaboration mode. Defaults to "${config.defaultMode}". "orchestrated" = captain relays everything; "egalitarian" = experts debate peer-to-peer under a budget (use max_rounds/max_tokens to bound it).`,
+        enum: ['orchestrated', 'egalitarian', 'redteam'],
+        description: `Collaboration mode. Defaults to "${config.defaultMode}". "orchestrated" = captain relays everything; "egalitarian" = experts debate peer-to-peer under a budget (use max_rounds/max_tokens to bound it); "redteam" = 针锋相对评审 of a settled plan (experts attack the plan).`,
       },
       max_rounds: { type: 'integer', description: `Debate round cap (default ${DEFAULT_MAX_ROUNDS}); exceeding it mutes the meeting.` },
       max_tokens: { type: 'integer', description: `Total token budget for the meeting transcript (default ${DEFAULT_MAX_TOKENS}); exceeding it mutes the meeting.` },
@@ -244,9 +244,9 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const meetingName = String(args.name ?? '').trim()
       if (meetingName === '') throw new Error('meeting name must not be empty')
       const meetingId = sanitizeKey(meetingName)
-      const mode = (args.mode ?? config.defaultMode) as 'orchestrated' | 'egalitarian'
-      if (mode !== 'orchestrated' && mode !== 'egalitarian') {
-        throw new Error(`mode must be "orchestrated" or "egalitarian", got "${String(args.mode)}"`)
+      const mode = (args.mode ?? config.defaultMode) as 'orchestrated' | 'egalitarian' | 'redteam'
+      if (mode !== 'orchestrated' && mode !== 'egalitarian' && mode !== 'redteam') {
+        throw new Error(`mode must be "orchestrated" | "egalitarian" | "redteam", got "${String(args.mode)}"`)
       }
       return withMeetingLock(captainLockKey(stateRoot, captain.id), async () => {
         const current = await findMeetingByCaptain(stateRoot, captain.id)
@@ -577,8 +577,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         const { meeting, identity } = await requireFreshParticipant(stateRoot, located.id, caller.id)
         ensureActive(meeting)
         const speaker = identity.kind === 'captain' ? CAPTAIN_KEY : identity.name
-        if (meeting.mode === 'orchestrated' && identity.kind === 'node' && to !== CAPTAIN_KEY) {
-          throw new Error('orchestrated mode: nodes report to the captain only — the captain relays between nodes')
+        if (meeting.mode !== 'egalitarian' && identity.kind === 'node' && to !== CAPTAIN_KEY) {
+          throw new Error('orchestrated/redteam mode: nodes report to the captain only — the captain relays between nodes')
         }
         if (to === CAPTAIN_KEY) {
           // Captain-bound messages are persisted in the transcript; live steering happens after the lock.

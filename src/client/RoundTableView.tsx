@@ -198,6 +198,13 @@ function nodeStatusLabel(node: WireNode, translate: (key: string) => string): st
   return translate('activityReady')
 }
 
+/** 专家列表排序权重：工作中(0) < 就绪/待唤醒(1) < 已退出(3，置底)。 */
+function nodeListRank(node: { status: string; activity?: string }): number {
+  if (node.status === 'removed' || node.activity === 'removed') return 3
+  if (node.activity === 'running') return 0
+  return 1
+}
+
 /** 来源对话短号前缀（显示在会议切换下拉里，区分不同对话开的会议）。 */
 function sourcePrefix(captainSessionId: string): string {
   if (captainSessionId === '') return '对话'
@@ -700,7 +707,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     )
   }
 
-  const modeLabel = meeting.mode === 'egalitarian' ? translate('modeEgalitarian') : translate('modeOrchestrated')
+  const modeLabel = meeting.mode === 'egalitarian'
+    ? translate('modeEgalitarian')
+    : meeting.mode === 'redteam'
+      ? translate('modeRedteam')
+      : translate('modeOrchestrated')
   const roundsPct = meeting.budget.maxRounds <= 0 ? 0
     : Math.min(100, (meeting.budget.usedRounds / meeting.budget.maxRounds) * 100)
   const tokensPct = meeting.budget.maxTokens <= 0 ? 0
@@ -1009,7 +1020,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             </button>
           </div>
           <div className={styles.panelBody}>
-            {meeting.nodes.map((node) => {
+            {[...meeting.nodes]
+              .sort((a, b) => nodeListRank(a) - nodeListRank(b))
+              .map((node) => {
               const brand = providerBrand(node.provider)
               const removed = node.status === 'removed' || node.activity === 'removed'
               const queuedRemove = pendingRemoveKeys.has(node.key)

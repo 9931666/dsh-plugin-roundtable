@@ -40,8 +40,8 @@ export interface Config {
   memberProvider?: string
   /** Meeting size cap in nodes (default `8`). */
   maxNodes?: number
-  /** Default collaboration mode (default `orchestrated`). */
-  defaultMode?: 'orchestrated' | 'egalitarian'
+  /** Default collaboration mode (default `orchestrated`; `redteam` = 针锋相对评审). */
+  defaultMode?: 'orchestrated' | 'egalitarian' | 'redteam'
   /** Node delegation depth cap (default `1`). */
   memberMaxDepth?: number
   /** Prompt-section order for the usage policy (default `116`). */
@@ -52,7 +52,7 @@ export const Config: z<Config> = z.object({
   stateDir: z.string().default('.roundtable'),
   memberProvider: z.string().default('spawn'),
   maxNodes: z.natural().min(1).default(8),
-  defaultMode: z.union(['orchestrated', 'egalitarian']).default('orchestrated'),
+  defaultMode: z.union(['orchestrated', 'egalitarian', 'redteam']).default('orchestrated'),
   memberMaxDepth: z.natural().default(1),
   promptSectionOrder: z.natural().default(116),
 })
@@ -62,7 +62,7 @@ export const SETTINGS_NAMESPACE = settingsNamespace('roundtable')
 
 /** User-tunable preference schema persisted under the `roundtable` namespace. */
 const PreferenceSchema = z.object({
-  defaultMode: z.union(['orchestrated', 'egalitarian']).default('orchestrated'),
+  defaultMode: z.union(['orchestrated', 'egalitarian', 'redteam']).default('orchestrated'),
   maxRounds: z.natural().default(10),
   maxTokens: z.natural().default(200_000),
   showAllMeetings: z.boolean().default(true),
@@ -75,7 +75,7 @@ const PreferenceSchema = z.object({
 /** The model-facing usage policy: when and how to drive RoundTable. */
 function usageSectionText(toolNames: string): string {
   return `When the user asks to run a round-table meeting (圆桌会议) — e.g. "开个圆桌会议讨论 X", "让几个专家辩论 Y", "use RoundTable to decide Z" — you are the captain (主持人) of a multi-expert meeting. Follow this protocol:
-1. Call roundtable_create with a meeting name, the goal, and the collaboration mode. Default to the user's configured mode (orchestrated unless asked otherwise); for egalitarian mode also bound max_rounds/max_tokens so the debate cannot run away.
+1. Call roundtable_create with a meeting name, the goal, and the collaboration mode. Default to the user's configured mode (orchestrated unless asked otherwise); for egalitarian mode also bound max_rounds/max_tokens so the debate cannot run away; for "redteam" (针锋相对) the meeting attacks an already-settled plan — experts only find flaws, no alternative proposals.
 2. Call roundtable_add_node once per expert role the goal needs (researcher, engineer, reviewer, ...). Nodes are durable subagents that carry the《全局协作总纲》as their persona. By default a node inherits your current provider/model; pass provider/model only when the user explicitly wants a different route for that expert. Never ask the user to pick per node.
 3. Wire the topology with roundtable_connect (forward = pipeline hand-off, bidirectional = debate channel) to reflect the intended collaboration, and drop stale edges with roundtable_disconnect.
 4. Lead by delegation: send tasks and relayed opinions to nodes with roundtable_send_message, monitor with roundtable_status, and pull the aggregation gateway digest with roundtable_summarize. Do not duplicate a node's work merely because its turn is slow. In orchestrated mode you relay everything; in egalitarian mode nodes debate each other directly and you only referee (watch the budget).

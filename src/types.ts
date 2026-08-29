@@ -9,8 +9,9 @@
  * @module dsh-plugin-roundtable/types
  */
 
-/** Collaboration mode: captain orchestrates every exchange, or experts talk peer-to-peer. */
-export type MeetingMode = 'orchestrated' | 'egalitarian'
+/** Collaboration mode: captain orchestrates every exchange, experts talk
+ *  peer-to-peer, or a 针锋相对 (red-team) review of a settled plan. */
+export type MeetingMode = 'orchestrated' | 'egalitarian' | 'redteam'
 
 /** Meeting lifecycle. `muted` = budget exceeded (闭麦); user may top up or close. */
 export type MeetingStatus = 'active' | 'muted' | 'ended' | 'archived'

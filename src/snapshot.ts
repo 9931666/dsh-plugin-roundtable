@@ -10,7 +10,28 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { listMeetings, readMeeting, readReview, readTranscript, readUserActions } from './state.ts'
 import { aggregateUtterances } from './aggregator.ts'
 import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
-import type { Meeting, MeetingUtterance, UserAction } from './types.ts'
+import type { Meeting, MeetingNode, MeetingUtterance, UserAction } from './types.ts'
+
+/** 按 key 去重节点列表：同名 key 多次加入（删了重建）时保留最新一条，
+ *  且非 removed 优先。返回顺序 = meeting.nodes 首次出现顺序。 */
+function dedupeNodesByKey(nodes: MeetingNode[]): MeetingNode[] {
+  const byKey = new Map<string, MeetingNode>()
+  for (const node of nodes) {
+    const prev = byKey.get(node.key)
+    if (prev === undefined) {
+      byKey.set(node.key, node)
+      continue
+    }
+    const prevActive = prev.status !== 'removed'
+    const nodeActive = node.status !== 'removed'
+    if (nodeActive !== prevActive) {
+      if (nodeActive) byKey.set(node.key, node)
+      continue
+    }
+    if ((node.joinedAt ?? 0) >= (prev.joinedAt ?? 0)) byKey.set(node.key, node)
+  }
+  return [...byKey.values()]
+}
 
 /** One meeting snapshot for the Web UI. */
 export interface MeetingSnapshot {
@@ -110,7 +131,7 @@ function synthesizedEdges(meeting: Meeting): MeetingSnapshot['edges'] {
       to: edge.to,
       direction: edge.direction,
     }))
-  if (meeting.mode !== 'orchestrated') return real
+  if (meeting.mode === 'egalitarian') return real
   const covered = new Set(real.flatMap((edge) => [`${edge.from}→${edge.to}`, `${edge.to}→${edge.from}`]))
   const out: MeetingSnapshot['edges'] = [...real]
   for (const node of meeting.nodes) {
@@ -207,11 +228,11 @@ export async function collectMeetingSnapshots(
           usedRounds: meeting.budget.usedRounds,
           usedTokens: meeting.budget.usedTokens,
         },
-        // Keep every node the meeting ever admitted, so the topology still
-        // shows models that were added then removed (e.g. an expert who left).
-        // A removed node renders degraded (status 'removed') instead of
-        // disappearing, which would hide which models actually participated.
-        nodes: meeting.nodes.map((node) => {
+        // 每个 key 只保留一条有效节点（删了重建 / 同名 key 多实例时取最新，
+        // 非 removed 优先）。这样拓扑图与专家列表不会出现同一专家多条（避免
+        // kimi+deepseek 同名残留）。removed 节点仍输出（status='removed'），
+        // 由前端负责「拓扑图隐藏、专家列表置底」。
+        nodes: dedupeNodesByKey(meeting.nodes).map((node) => {
           let activity = 'unspawned'
           if (node.status === 'removed') {
             activity = 'removed'

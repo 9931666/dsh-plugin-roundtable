@@ -13,6 +13,7 @@ export type RoundTableKey =
   | 'mode'
   | 'modeOrchestrated'
   | 'modeEgalitarian'
+  | 'modeRedteam'
   | 'status'
   | 'round'
   | 'roundsBudget'
@@ -139,6 +140,7 @@ export const zh: Record<RoundTableKey, string> = {
   mode: '协作模式',
   modeOrchestrated: '主持人统筹',
   modeEgalitarian: '多模型平等',
+  modeRedteam: '针锋相对',
   status: '状态',
   round: '轮',
   roundsBudget: '轮数',
@@ -259,6 +261,7 @@ export const en: Record<RoundTableKey, string> = {
   mode: 'Mode',
   modeOrchestrated: 'Orchestrated',
   modeEgalitarian: 'Egalitarian',
+  modeRedteam: 'Adversarial review',
   status: 'Status',
   round: 'Round',
   roundsBudget: 'Rounds',

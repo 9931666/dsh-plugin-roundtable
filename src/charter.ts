@@ -15,6 +15,16 @@ export function buildCharter(meeting: Meeting): string {
   const edges = meeting.edges
     .map((edge) => `  - ${edge.from} → ${edge.to}${edge.direction === 'bidirectional' ? '（双向）' : '（单向）'}`)
     .join('\n')
+  const redteamRules = meeting.mode === 'redteam'
+    ? [
+        '',
+        '五、针锋相对评审协议（本会议为「针锋相对」模式）',
+        '- 目标：对主持人已定稿的方案挑毛病（红队审查），找出方案的真实缺陷与认知盲区。',
+        '- 每位专家只负责找缺陷，严禁提出替代方案；指出问题要具体、可复现，不较真不抬杠。',
+        '- 每条观点只聚焦一个缺陷，建议 1~3 条；如无缺陷可明确说明"暂无"。',
+        '- 主持人用 roundtable_start_review(question, plan) 记录议题与方案，专家发言后主持人用 roundtable_collect_review 收集观点，用户逐条「支持/驳回」。',
+      ]
+    : []
   return [
     '《全局协作总纲》',
     '',
@@ -38,5 +48,6 @@ export function buildCharter(meeting: Meeting): string {
     '- 遇到分歧或无法独自决定的事项，立即建议主持人触发 [需人类决策]，严禁自行替用户拍板。',
     '- 严禁编造不存在的 API、数据或事实；不确定时明确说明。',
     '- 超预算（轮数/Token）时会议将自动闭麦暂停。',
+    ...redteamRules,
   ].join('\n')
 }

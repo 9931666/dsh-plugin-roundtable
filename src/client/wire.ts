@@ -147,7 +147,7 @@ export interface WireMeeting {
 }
 
 export interface RoundTablePrefs {
-  defaultMode: 'orchestrated' | 'egalitarian'
+  defaultMode: 'orchestrated' | 'egalitarian' | 'redteam'
   maxRounds: number
   maxTokens: number
   /** 互通开关：true=显示所有圆桌会议；false=仅显示当前对话开启的会议。 */

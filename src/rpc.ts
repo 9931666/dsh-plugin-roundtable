@@ -47,7 +47,7 @@ export type RpcResult<T> =
 
 /** Wire shape of the runtime preferences. */
 export interface RoundTablePreferences {
-  readonly defaultMode: 'orchestrated' | 'egalitarian'
+  readonly defaultMode: 'orchestrated' | 'egalitarian' | 'redteam'
   readonly maxRounds: number
   readonly maxTokens: number
   /** 互通开关：true = 显示所有圆桌会议；false = 仅显示当前对话开启的会议。 */
@@ -166,7 +166,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               // page stays usable; persistence resumes on the next clean start.
               const base = runtime.fallbackPrefs
               const next: RoundTablePreferences = {
-                defaultMode: patch.defaultMode === 'orchestrated' || patch.defaultMode === 'egalitarian' ? patch.defaultMode : base.defaultMode,
+                defaultMode: patch.defaultMode === 'orchestrated' || patch.defaultMode === 'egalitarian' || patch.defaultMode === 'redteam' ? patch.defaultMode : base.defaultMode,
                 maxRounds: typeof patch.maxRounds === 'number' && Number.isFinite(patch.maxRounds) && patch.maxRounds >= 1 ? Math.floor(patch.maxRounds) : base.maxRounds,
                 maxTokens: typeof patch.maxTokens === 'number' && Number.isFinite(patch.maxTokens) && patch.maxTokens >= 1000 ? Math.floor(patch.maxTokens) : base.maxTokens,
                 showAllMeetings: typeof patch.showAllMeetings === 'boolean' ? patch.showAllMeetings : base.showAllMeetings,
