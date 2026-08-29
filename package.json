@@ -1,8 +1,22 @@
 {
   "name": "@huanlin/dsh-plugin-roundtable",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "description": "RoundTable for DeepSeek Harness: turn one session into a visualized round-table meeting — expert nodes on a ring, directed edges, an aggregation gateway, proxy thinking for black-box worker models, and a live topology tab in the web GUI. Includes 针锋相对 (adversarial review): red-team experts attack a settled plan and you endorse real flaws.",
+  "author": {
+    "name": "huanlin",
+    "url": "https://github.com/9931666"
+  },
+  "homepage": "https://github.com/9931666/dsh-plugin-roundtable#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/9931666/dsh-plugin-roundtable.git"
+  },
+  "bugs": {
+    "url": "https://github.com/9931666/dsh-plugin-roundtable/issues"
   },
   "keywords": [
     "dsh",
@@ -12,9 +26,10 @@
     "multi-agent",
     "debate",
     "topology",
-    "proxy-thinking"
+    "proxy-thinking",
+    "adversarial-review",
+    "red-team"
   ],
-  "description": "RoundTable for DeepSeek Harness: turn one session into a visualized round-table meeting — expert nodes on a ring, directed edges, an aggregation gateway, proxy thinking for black-box worker models, and a live topology tab in the web GUI.",
   "type": "module",
   "license": "MIT",
   "main": "./lib/index.js",
@@ -34,6 +49,7 @@
   "files": [
     "lib",
     "cordis.patch.yml",
+    "release-notes",
     "README.md"
   ],
   "dsh": {

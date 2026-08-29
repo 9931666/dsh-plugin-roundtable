@@ -1,0 +1,93 @@
+name: Publish Package
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == '9931666/dsh-plugin-roundtable'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Read package version
+        id: version
+        shell: bash
+        run: |
+          package_version="$(node --print "require('./package.json').version")"
+          echo "value=${package_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Verify release version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
+            test -f "release-notes/v${PACKAGE_VERSION}.md"
+          else
+            test "${RELEASE_VERSION}" = "${PACKAGE_VERSION}"
+          fi
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build and pack
+        run: |
+          npm run typecheck
+          npm run build
+          npm pack --dry-run --ignore-scripts
+
+      - name: Publish to npm
+        run: npm publish --ignore-scripts --access public
+
+  release:
+    if: github.event_name == 'push'
+    needs: publish
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Read package version
+        id: version
+        shell: bash
+        run: |
+          package_version="$(node --print "require('./package.json').version")"
+          echo "value=${package_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}
+          name: RoundTable v${{ steps.version.outputs.value }}
+          body_path: release-notes/v${{ steps.version.outputs.value }}.md
+          draft: false
+          prerelease: false
