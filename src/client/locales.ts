@@ -110,6 +110,13 @@ export type RoundTableKey =
   | 'reviewEndorseFailed'
   | 'reviewHint'
   | 'reviewClose'
+  | 'reviewBadge'
+  | 'reviewOpen'
+  | 'reviewPanelTitle'
+  | 'reviewPanelEmpty'
+  | 'reviewStatusReady'
+  | 'reviewStatusReviewing'
+  | 'reviewEndorsedCount'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -223,6 +230,13 @@ export const zh: Record<RoundTableKey, string> = {
   reviewEndorseFailed: '标记失败',
   reviewHint: '点击「支持」= 认定该缺陷真实存在，将进入后续方案修改。',
   reviewClose: '关闭',
+  reviewBadge: '针锋相对',
+  reviewOpen: '打开评审',
+  reviewPanelTitle: '分针记录',
+  reviewPanelEmpty: '暂无评审记录',
+  reviewStatusReady: '已就绪',
+  reviewStatusReviewing: '评审中',
+  reviewEndorsedCount: '已认定',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -330,4 +344,11 @@ export const en: Record<RoundTableKey, string> = {
   reviewEndorseFailed: 'Endorse failed',
   reviewHint: 'Click "Support" to confirm a real flaw — it feeds the next plan revision.',
   reviewClose: 'Close',
+  reviewBadge: 'Adversarial review',
+  reviewOpen: 'Open review',
+  reviewPanelTitle: 'Review log',
+  reviewPanelEmpty: 'No review records yet',
+  reviewStatusReady: 'ready',
+  reviewStatusReviewing: 'reviewing',
+  reviewEndorsedCount: 'endorsed',
 }

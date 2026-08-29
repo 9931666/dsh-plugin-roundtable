@@ -59,6 +59,58 @@
   color: rgba(0, 0, 0, 0.55);
 }
 
+/* 标题区「针锋相对」入口：可点击打开评审窗口 */
+.reviewBadge {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(198, 40, 40, 0.45);
+  background: rgba(198, 40, 40, 0.06);
+  color: #c62828;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 120ms ease;
+}
+
+.reviewBadge:hover {
+  background: rgba(198, 40, 40, 0.14);
+}
+
+/* 右栏「分针记录」摘要卡片：可点击打开评审窗口 */
+.reviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  width: 100%;
+  border: 1px solid rgba(198, 40, 40, 0.25);
+  border-radius: 8px;
+  background: rgba(198, 40, 40, 0.05);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.reviewCard:hover {
+  background: rgba(198, 40, 40, 0.1);
+}
+
+.reviewCardTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.reviewCardMeta {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.5);
+}
+
 /* 会议删除按钮：固定在右栏顶部操作条（不再挤在标题行最右，窄屏也能看到）。 */
 .meetingDelete {
   display: inline-flex;

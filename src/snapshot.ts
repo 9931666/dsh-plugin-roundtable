@@ -100,12 +100,16 @@ export interface MeetingSnapshot {
  * skeleton disappearing the moment they add one edge.
  */
 function synthesizedEdges(meeting: Meeting): MeetingSnapshot['edges'] {
-  const real = meeting.edges.map((edge) => ({
-    id: edge.id,
-    from: edge.from,
-    to: edge.to,
-    direction: edge.direction,
-  }))
+  // 已移除的专家从拓扑彻底消失：其真实连线也不再返回（前端拓扑不渲染 removed 节点）。
+  const removedKeys = new Set(meeting.nodes.filter((node) => node.status === 'removed').map((node) => node.key))
+  const real = meeting.edges
+    .filter((edge) => !removedKeys.has(edge.from) && !removedKeys.has(edge.to))
+    .map((edge) => ({
+      id: edge.id,
+      from: edge.from,
+      to: edge.to,
+      direction: edge.direction,
+    }))
   if (meeting.mode !== 'orchestrated') return real
   const covered = new Set(real.flatMap((edge) => [`${edge.from}→${edge.to}`, `${edge.to}→${edge.from}`]))
   const out: MeetingSnapshot['edges'] = [...real]

@@ -863,6 +863,19 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             <span className={styles.badge}>{modeLabel}</span>
             <span className={styles.badge}>{meeting.status}</span>
             <span className={styles.round}>{translate('round')} {meeting.round}</span>
+            {meeting.review !== null ? (
+              <button
+                type="button"
+                className={styles.reviewBadge}
+                title={translate('reviewOpen')}
+                onClick={() => setReviewOpen(true)}
+              >
+                {translate('reviewBadge')}
+                {meeting.review.status === 'ready'
+                  ? ` · ${meeting.review.viewpoints.length}`
+                  : ` · ${translate('reviewStatusReviewing')}`}
+              </button>
+            ) : null}
           </div>
           <div className={styles.budgetRow}>
             <span className={styles.budgetLabel}>{translate('roundsBudget')}</span>
@@ -911,7 +924,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </svg>
           {renderNode('captain', 'DeepSeek · 主持', 'captain')}
           {renderNode('aggregator', '汇聚网关', 'aggregator')}
-          {meeting.nodes.map((node) => renderNode(node.key, node.key, 'node'))}
+          {meeting.nodes.filter((node) => node.status !== 'removed').map((node) => renderNode(node.key, node.key, 'node'))}
           {edgeRemoveDots.map((dot) => (
             <button
               key={dot.id}
@@ -1082,6 +1095,37 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                 <div className={styles.logText}>{utterance.text}</div>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelTitleRow}>
+            <span className={styles.panelTitle}>{translate('reviewPanelTitle')}</span>
+            {meeting.review !== null ? (
+              <button
+                type="button"
+                className={styles.panelAdd}
+                aria-label={translate('reviewOpen')}
+                title={translate('reviewOpen')}
+                onClick={() => setReviewOpen(true)}
+              >
+                ›
+              </button>
+            ) : null}
+          </div>
+          <div className={styles.panelBody}>
+            {meeting.review === null ? (
+              <div className={styles.panelEmpty}>{translate('reviewPanelEmpty')}</div>
+            ) : (
+              <button type="button" className={styles.reviewCard} onClick={() => setReviewOpen(true)}>
+                <div className={styles.reviewCardTitle}>{meeting.review.question}</div>
+                <div className={styles.reviewCardMeta}>
+                  {meeting.review.status === 'ready' ? translate('reviewStatusReady') : translate('reviewStatusReviewing')}
+                  {' · '}{meeting.review.viewpoints.length} {translate('reviewViewpoints')}
+                  {' · '}{meeting.review.viewpoints.filter((viewpoint) => viewpoint.endorsed).length} {translate('reviewEndorsedCount')}
+                </div>
+              </button>
+            )}
           </div>
         </section>
 
