@@ -1193,6 +1193,156 @@
   line-height: 1.5;
 }
 
+/* ---------- 针锋相对评审弹窗（三区布局） ---------- */
+
+.reviewModal {
+  width: 860px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reviewBody {
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.reviewLeft {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-right: 1px solid rgba(128, 128, 128, 0.15);
+  padding-right: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.reviewRight {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reviewSectionTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.reviewQuestion {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  background: rgba(77, 107, 254, 0.07);
+  border: 1px solid rgba(77, 107, 254, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.reviewPlan {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.75);
+  background: #fafafa;
+  border: 1px solid rgba(128, 128, 128, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.reviewList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.reviewItem {
+  border: 1px solid rgba(128, 128, 128, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fdfdfd;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reviewItemHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reviewNode {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
+  flex: 1;
+}
+
+.reviewEndorsed {
+  font-size: 10px;
+  color: #c62828;
+  background: rgba(198, 40, 40, 0.08);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
+}
+
+.reviewContent {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.8);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reviewActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.reviewSupport {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(198, 40, 40, 0.45);
+  background: #ffffff;
+  color: #c62828;
+  cursor: pointer;
+}
+
+.reviewSupport:hover {
+  background: rgba(198, 40, 40, 0.08);
+}
+
+.reviewSupportDone {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(198, 40, 40, 0.3);
+  background: rgba(198, 40, 40, 0.08);
+  color: #c62828;
+  cursor: default;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .breathing {
     animation: none;

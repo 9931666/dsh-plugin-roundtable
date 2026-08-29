@@ -5,13 +5,15 @@
  * - `meeting.json`     — the Meeting record (nodes, edges, decisions, budget).
  * - `charter.md`       — the injected《全局协作总纲》(informational copy).
  * - `transcript.jsonl` — append-only utterance log (torn-tail tolerant on read).
+ * - `review.json`      — 针锋相对评审记录（议题/方案/观点/支持标记）。
+ * - `user-actions.jsonl` — UI 行为记录（主持人下轮执行）。
  * @module dsh-plugin-roundtable/state
  */
 
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import type { Meeting, MeetingUtterance, UserAction } from './types.ts'
+import type { Meeting, MeetingUtterance, ReviewRecord, UserAction } from './types.ts'
 
 /** Stable directory id from a display name (keeps CJK, lowercases latin). */
 export function sanitizeKey(value: string): string {
@@ -150,4 +152,34 @@ export async function clearUserActions(stateRoot: string, meetingId: string): Pr
   const before = await readUserActions(stateRoot, meetingId)
   await writeFile(join(dir, 'user-actions.jsonl'), '', 'utf8')
   return before.length
+}
+
+/** Read the 针锋相对 review record; undefined when absent. */
+export async function readReview(stateRoot: string, meetingId: string): Promise<ReviewRecord | undefined> {
+  try {
+    const raw = await readFile(join(meetingDirOf(stateRoot, meetingId), 'review.json'), 'utf8')
+    return JSON.parse(raw) as ReviewRecord
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+/** Persist the review record (atomic). */
+export async function writeReview(stateRoot: string, meetingId: string, review: ReviewRecord): Promise<void> {
+  const dir = meetingDirOf(stateRoot, meetingId)
+  await mkdir(dir, { recursive: true })
+  review.updatedAt = Date.now()
+  await writeJsonAtomic(join(dir, 'review.json'), review)
+}
+
+/** Set one viewpoint's endorsed flag; returns true when it changed. */
+export async function endorseViewpoint(stateRoot: string, meetingId: string, viewpointId: string): Promise<boolean> {
+  const review = await readReview(stateRoot, meetingId)
+  if (review === undefined) return false
+  const viewpoint = review.viewpoints.find((candidate) => candidate.id === viewpointId)
+  if (viewpoint === undefined || viewpoint.endorsed) return false
+  viewpoint.endorsed = true
+  await writeReview(stateRoot, meetingId, review)
+  return true
 }

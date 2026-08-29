@@ -14,19 +14,21 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
-import type { Meeting, MeetingDecision, MeetingEdge, MeetingNode, MeetingUtterance } from './types.ts'
+import type { Meeting, MeetingDecision, MeetingEdge, MeetingNode, MeetingUtterance, ReviewRecord } from './types.ts'
 import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
 import {
   appendUtterance,
   clearUserActions,
   meetingDirOf,
   readMeeting,
+  readReview,
   readTranscript,
   readUserActions,
   sanitizeKey,
   stateRootOf,
   withMeetingLock,
   writeMeeting,
+  writeReview,
 } from './state.ts'
 import { buildCharter } from './charter.ts'
 import { aggregateUtterances } from './aggregator.ts'
@@ -816,6 +818,100 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         return clearUserActions(stateRoot, fresh.id)
       })
       return { cleared }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'roundtable_start_review',
+    description: 'Start a 针锋相对 (adversarial) review of a settled plan: records the user\'s original question and the captain\'s plan into review.json, so the Web review window can show them. Call this AFTER the user agreed to start the mode and BEFORE/WHILE the red-team experts give their objections. Requires the captain.',
+    parameters: {
+      question: { type: 'string', required: true, description: 'The user\'s original question / topic.' },
+      plan: { type: 'string', required: true, description: 'The settled plan and its explanation (the object under review).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          review_id: { type: 'string', required: true },
+          status: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Review started (id ${value.review_id}, status ${value.status}). Tell the experts to attack ONLY the plan (red-team).`,
+      }],
+    },
+    async execute(args, exec) {
+      const captain = requireCaptain(exec)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      const question = String(args.question ?? '').trim()
+      const plan = String(args.plan ?? '').trim()
+      if (question === '' || plan === '') throw new Error('question and plan must not be empty')
+      return withCaptainLock(stateRoot, located.id, captain.id, 'start a review', async (fresh) => {
+        const now = Date.now()
+        const review: ReviewRecord = {
+          meetingId: fresh.id,
+          question,
+          plan,
+          status: 'reviewing',
+          viewpoints: [],
+          startedAt: now,
+          updatedAt: now,
+        }
+        await writeReview(stateRoot, fresh.id, review)
+        return { review_id: fresh.id, status: review.status }
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'roundtable_collect_review',
+    description: 'Collect the red-team experts\' objections from the transcript into review.json (viewpoints), then the Web review window becomes ready. Call this after the experts have spoken (roundtable_speak). Idempotent: already-collected utterances are skipped. Requires the captain.',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          collected: { type: 'integer', required: true },
+          status: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Review collected: ${value.collected} viewpoint(s), status ${value.status}.`,
+      }],
+    },
+    async execute(_args, exec) {
+      const captain = requireCaptain(exec)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'collect review', async (fresh) => {
+        const review = await readReview(stateRoot, fresh.id)
+        if (review === undefined) throw new Error('no review in progress — call roundtable_start_review first')
+        const existing = new Set(review.viewpoints.map((viewpoint) => viewpoint.id))
+        const utterances = await readTranscript(stateRoot, fresh.id)
+        let collected = 0
+        for (const utterance of utterances) {
+          if (utterance.nodeKey === CAPTAIN_KEY) continue
+          if (utterance.kind !== 'speech' && utterance.kind !== 'proxy-thinking') continue
+          if (utterance.ts < review.startedAt) continue
+          if (existing.has(utterance.id)) continue
+          review.viewpoints.push({
+            id: utterance.id,
+            nodeKey: utterance.nodeKey,
+            content: utterance.content,
+            endorsed: false,
+            ts: utterance.ts,
+          })
+          collected += 1
+        }
+        if (collected > 0) review.status = 'ready'
+        await writeReview(stateRoot, fresh.id, review)
+        return { collected, status: review.status }
+      })
     },
   }))
 

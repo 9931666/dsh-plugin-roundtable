@@ -251,6 +251,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [kbPathInput, setKbPathInput] = useState('')
   const [kbListing, setKbListing] = useState<WireKbListing | null>(null)
   const [kbContentChanged, setKbContentChanged] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const reviewAutoShown = useRef<string | null>(null)
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -370,6 +372,42 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // Selected meeting (kept stable while the polled list refreshes), falling
   // back to the first meeting when the selection is missing or unset.
   const meeting = meetings.find((candidate) => candidate.id === selectedId) ?? meetings[0]
+
+  // 针锋相对：评审就绪（status=ready）时自动弹出评审窗口（每会议只自动弹一次）。
+  useEffect(() => {
+    if (meeting === undefined) return
+    const review = meeting.review
+    if (review !== null && review.status === 'ready' && reviewAutoShown.current !== meeting.id) {
+      reviewAutoShown.current = meeting.id
+      setReviewOpen(true)
+    }
+  }, [meeting])
+
+  // 用户点「支持」：认定该缺陷真实存在（本地即时更新，RPC 持久化+通知主持人）。
+  const endorseViewpoint = (viewpointId: string): void => {
+    if (meeting === undefined) return
+    void rpc<{ endorsed: boolean }>('roundtable/review.endorse', { meetingId: meeting.id, viewpointId })
+      .then((result) => {
+        if (result.ok) {
+          setMeetings((previous) => previous.map((candidate) => {
+            if (candidate.id !== meeting.id || candidate.review === null) return candidate
+            return {
+              ...candidate,
+              review: {
+                ...candidate.review,
+                viewpoints: candidate.review.viewpoints.map((viewpoint) =>
+                  viewpoint.id === viewpointId ? { ...viewpoint, endorsed: true } : viewpoint,
+                ),
+              },
+            }
+          }))
+          setToast({ kind: 'ok', text: translate('reviewSupportedToast') })
+        } else {
+          setToast({ kind: 'err', text: result.error?.message ?? translate('reviewEndorseFailed') })
+        }
+      })
+      .catch(() => setToast({ kind: 'err', text: translate('reviewEndorseFailed') }))
+  }
 
   const positions = useMemo(
     () => meeting === undefined ? new Map<string, Point>() : layoutPositions(size, meeting),
@@ -1242,6 +1280,70 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               <span className={styles.manageHint}>{translate('manageEffectiveHint')}</span>
               <button type="button" className={styles.manageCloseBtn} onClick={closeManage}>
                 {translate('manageClose')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {reviewOpen && meeting?.review !== null ? (
+        <div className={styles.manageOverlay} onClick={() => setReviewOpen(false)}>
+          <div
+            className={styles.reviewModal}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-label={translate('reviewTitle')}
+          >
+            <div className={styles.manageTitle}>
+              {translate('reviewTitle')} · {meeting.name}
+            </div>
+            <div className={styles.reviewBody}>
+              <div className={styles.reviewLeft}>
+                <div className={styles.reviewSectionTitle}>{translate('reviewQuestion')}</div>
+                <div className={styles.reviewQuestion}>{meeting.review!.question}</div>
+                <div className={styles.reviewSectionTitle}>{translate('reviewPlan')}</div>
+                <div className={styles.reviewPlan}>{meeting.review!.plan}</div>
+              </div>
+              <div className={styles.reviewRight}>
+                <div className={styles.reviewSectionTitle}>
+                  {translate('reviewViewpoints')}（{meeting.review!.viewpoints.length}）
+                </div>
+                <div className={styles.reviewList}>
+                  {meeting.review!.viewpoints.length === 0 ? (
+                    <div className={styles.panelEmpty}>{translate('reviewEmpty')}</div>
+                  ) : (
+                    meeting.review!.viewpoints.map((viewpoint) => {
+                      const brand = providerBrand(viewpoint.nodeKey === 'captain' ? '' : viewpoint.nodeKey)
+                      return (
+                        <div key={viewpoint.id} className={styles.reviewItem}>
+                          <div className={styles.reviewItemHead}>
+                            {brandAvatar(brand, 'list')}
+                            <span className={styles.reviewNode}>{viewpoint.nodeKey}</span>
+                            {viewpoint.endorsed ? (
+                              <span className={styles.reviewEndorsed}>{translate('reviewEndorsed')}</span>
+                            ) : null}
+                          </div>
+                          <div className={styles.reviewContent}>{viewpoint.content}</div>
+                          <div className={styles.reviewActions}>
+                            <button
+                              type="button"
+                              className={viewpoint.endorsed ? styles.reviewSupportDone : styles.reviewSupport}
+                              disabled={viewpoint.endorsed}
+                              onClick={() => endorseViewpoint(viewpoint.id)}
+                            >
+                              {viewpoint.endorsed ? translate('reviewSupported') : translate('reviewSupport')}
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className={styles.manageFooter}>
+              <span className={styles.manageHint}>{translate('reviewHint')}</span>
+              <button type="button" className={styles.manageCloseBtn} onClick={() => setReviewOpen(false)}>
+                {translate('reviewClose')}
               </button>
             </div>
           </div>

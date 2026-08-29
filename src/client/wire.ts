@@ -87,6 +87,22 @@ export interface WireKbListing {
   files: WireKbEntry[]
 }
 
+/** 针锋相对评审：一个观点。 */
+export interface WireReviewViewpoint {
+  id: string
+  nodeKey: string
+  content: string
+  endorsed: boolean
+}
+
+/** 针锋相对评审记录（快照携带，前端弹窗数据源）。 */
+export interface WireReview {
+  status: string
+  question: string
+  plan: string
+  viewpoints: WireReviewViewpoint[]
+}
+
 export interface WireUtterance {
   id: string
   from: string
@@ -112,6 +128,7 @@ export interface WireMeeting {
   edges: WireEdge[]
   pendingDecisions: WirePendingDecision[]
   pendingActions: WirePendingAction[]
+  review: WireReview | null
   digest: string
   messages: WireMessage[]
   recent: WireUtterance[]

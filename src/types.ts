@@ -146,3 +146,29 @@ export interface Meeting {
   createdAt: number
   updatedAt: number
 }
+
+/** 针锋相对评审：一个观点（红队专家提的一条缺陷）。 */
+export interface ReviewViewpoint {
+  id: string
+  /** 提出该观点的专家节点 key。 */
+  nodeKey: string
+  /** 缺陷内容（专家发言）。 */
+  content: string
+  /** 用户是否点击「支持」认定为真实缺陷。 */
+  endorsed: boolean
+  ts: number
+}
+
+/** 针锋相对评审记录（`<meetingDir>/review.json`，独立文件防 meeting.json 竞态）。 */
+export interface ReviewRecord {
+  meetingId: string
+  /** 用户最初提出的问题。 */
+  question: string
+  /** 主持人提供的方案与说明。 */
+  plan: string
+  /** reviewing=评审进行中；ready=观点已收集，弹窗可展示；done=用户完成评审。 */
+  status: 'reviewing' | 'ready' | 'done'
+  viewpoints: ReviewViewpoint[]
+  startedAt: number
+  updatedAt: number
+}

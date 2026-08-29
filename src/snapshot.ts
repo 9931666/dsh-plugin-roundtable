@@ -7,7 +7,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { listMeetings, readMeeting, readTranscript, readUserActions } from './state.ts'
+import { listMeetings, readMeeting, readReview, readTranscript, readUserActions } from './state.ts'
 import { aggregateUtterances } from './aggregator.ts'
 import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
 import type { Meeting, MeetingUtterance, UserAction } from './types.ts'
@@ -61,6 +61,18 @@ export interface MeetingSnapshot {
     model: string
     text: string
   }[]
+  /** 针锋相对评审（无则 null）。 */
+  review: {
+    status: string
+    question: string
+    plan: string
+    viewpoints: {
+      id: string
+      nodeKey: string
+      content: string
+      endorsed: boolean
+    }[]
+  } | null
   digest: string
   messages: {
     id: string
@@ -174,6 +186,7 @@ export async function collectMeetingSnapshots(
       if (sessionFilter !== undefined && meeting.captainSessionId !== sessionFilter) continue
       const utterances = await readTranscript(root.stateRoot, meetingId)
       const userActions = await readUserActions(root.stateRoot, meetingId)
+      const review = await readReview(root.stateRoot, meetingId)
       snapshots.push({
         id: meeting.id,
         name: meeting.name,
@@ -217,6 +230,17 @@ export async function collectMeetingSnapshots(
           .filter((decision) => decision.status === 'pending')
           .map((decision) => ({ id: decision.id, question: decision.question, options: decision.options })),
         pendingActions: userActions.map(wireAction),
+        review: review === undefined ? null : {
+          status: review.status,
+          question: review.question,
+          plan: review.plan,
+          viewpoints: review.viewpoints.map((viewpoint) => ({
+            id: viewpoint.id,
+            nodeKey: viewpoint.nodeKey,
+            content: viewpoint.content,
+            endorsed: viewpoint.endorsed,
+          })),
+        },
         digest: aggregateUtterances(utterances),
         messages: recentDirectedMessages(utterances),
         recent: recentUtterances(utterances),

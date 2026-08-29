@@ -98,6 +98,18 @@ export type RoundTableKey =
   | 'manageEffectiveHint'
   | 'manageClose'
   | 'manageNoExperts'
+  | 'reviewTitle'
+  | 'reviewQuestion'
+  | 'reviewPlan'
+  | 'reviewViewpoints'
+  | 'reviewEmpty'
+  | 'reviewSupport'
+  | 'reviewSupported'
+  | 'reviewSupportedToast'
+  | 'reviewEndorsed'
+  | 'reviewEndorseFailed'
+  | 'reviewHint'
+  | 'reviewClose'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -199,6 +211,18 @@ export const zh: Record<RoundTableKey, string> = {
   manageEffectiveHint: '改动将在主持人下一轮对话中正式起效（UI 会先行标记状态）。',
   manageClose: '关闭',
   manageNoExperts: '暂无专家，可通过下方表单新增',
+  reviewTitle: '针锋相对 · 方案评审',
+  reviewQuestion: '用户提出的问题',
+  reviewPlan: '主持人提供的方案与说明',
+  reviewViewpoints: '专家挑刺观点',
+  reviewEmpty: '（暂无观点，评审还在进行中）',
+  reviewSupport: '支持（认定为缺陷）',
+  reviewSupported: '已认定',
+  reviewSupportedToast: '已认定该缺陷，将进入后续方案修改',
+  reviewEndorsed: '已认定为缺陷',
+  reviewEndorseFailed: '标记失败',
+  reviewHint: '点击「支持」= 认定该缺陷真实存在，将进入后续方案修改。',
+  reviewClose: '关闭',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -294,4 +318,16 @@ export const en: Record<RoundTableKey, string> = {
   manageEffectiveHint: 'Changes take effect when the captain acts in the next round (the UI marks pending states right away).',
   manageClose: 'Close',
   manageNoExperts: 'No experts yet — add one with the form below',
+  reviewTitle: '针锋相对 · plan review',
+  reviewQuestion: 'User\'s question',
+  reviewPlan: 'Plan & explanation',
+  reviewViewpoints: 'Expert objections',
+  reviewEmpty: '(no objections yet, review in progress)',
+  reviewSupport: 'Support (real flaw)',
+  reviewSupported: 'Endorsed',
+  reviewSupportedToast: 'Endorsed as a real flaw; it will feed the plan revision',
+  reviewEndorsed: 'endorsed flaw',
+  reviewEndorseFailed: 'Endorse failed',
+  reviewHint: 'Click "Support" to confirm a real flaw — it feeds the next plan revision.',
+  reviewClose: 'Close',
 }

@@ -26,11 +26,13 @@ import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join } from 'node:path'
-import type { EdgeDirection, UserAction } from './types.ts'
+import type { EdgeDirection, ReviewRecord, UserAction } from './types.ts'
 import {
   appendUserAction,
+  endorseViewpoint,
   meetingDirOf,
   readMeeting,
+  readReview,
   readUserActions,
   stateRootOf,
   withMeetingLock,
@@ -347,6 +349,40 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               if (configured === '') return ok({ path: '', configured: false, error: '', files: [] })
               const listing = await listKbDirectory(configured)
               return ok({ path: configured, configured: true, error: listing.error, files: listing.files })
+            })
+          }
+          case 'roundtable/review.get': {
+            // 针锋相对评审状态：前端评审弹窗轮询此接口。
+            const body = payload as { meetingId?: unknown } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            if (meetingId === '') return fail('payload must be { meetingId }')
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
+              const review = await readReview(stateRoot, meetingId)
+              return ok({ review: review ?? null })
+            })
+          }
+          case 'roundtable/review.endorse': {
+            // 用户点「支持」：认定该缺陷真实存在；直接更新 review.json，并写
+            // 一条 user-action 让主持人下一轮知晓（进入后续方案修改）。
+            const body = payload as { meetingId?: unknown; viewpointId?: unknown } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const viewpointId = typeof body?.viewpointId === 'string' ? body.viewpointId : ''
+            if (meetingId === '' || viewpointId === '') return fail('payload must be { meetingId, viewpointId }')
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
+              const review = await readReview(stateRoot, meetingId)
+              const viewpoint = review?.viewpoints.find((candidate) => candidate.id === viewpointId)
+              if (viewpoint === undefined) return fail(`viewpoint "${viewpointId}" not found`)
+              const changed = await endorseViewpoint(stateRoot, meetingId, viewpointId)
+              if (changed) {
+                await appendUserAction(stateRoot, meetingId, {
+                  id: randomUUID(),
+                  ts: Date.now(),
+                  kind: 'other',
+                  nodeKey: viewpoint.nodeKey,
+                  text: `用户认定缺陷（针锋相对评审）：${viewpoint.content.replace(/\s+/g, ' ').slice(0, 60)}`,
+                })
+              }
+              return ok({ endorsed: true })
             })
           }
           default:

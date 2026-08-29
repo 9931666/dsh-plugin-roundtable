@@ -84,6 +84,7 @@ function usageSectionText(toolNames: string): string {
 7. Watch the budget in roundtable_status. A muted (闭麦) meeting can be topped up with roundtable_set_budget. Present the consolidated result, then roundtable_close the meeting.
 8. UI edits never touch meeting state directly: expert changes made in the Web UI (add/remove expert) are recorded as pending lines in the meeting's user-actions.jsonl (one JSON per line; read the "text" field). At the start of every round check roundtable_status for pending_actions: when present, execute each line with the matching roundtable_* tool (roundtable_add_node / roundtable_remove_node / ...), and only after EVERY action succeeded call roundtable_actions_clear to empty the file. If one action fails, keep the record and explain the failure in your reply — never clear a partially-executed file.
 9. Knowledge-base relay (主持人中转): the meeting's knowledge-base directory is recorded in the meeting state (kb_path, shown in roundtable_status). When an expert needs reference material, YOU read the specific file(s) with your file tools and relay the content to the expert — never copy the whole library. Read on demand, prefer summaries, and cap single-file size to avoid double token cost (you read + expert reads). A "已修改知识库部分内容" pending action means the KB changed: re-browse it to refresh your understanding.
+10. 针锋相对 (adversarial review): after you and the user settle a concrete plan, ASK whether they want to start this mode. If yes: call roundtable_start_review with the user's original question and the settled plan, then add red-team experts (role 红队审查) whose ONLY job is to attack the plan (no alternative proposals). When the experts have spoken, call roundtable_collect_review to gather their objections into the review record; the Web review window then opens automatically. The user clicks 「支持」 on real flaws — those endorsements arrive as pending user actions ("用户认定缺陷…"), so when you revise the plan next round, treat them as a known-flaws checklist.
 
 Tools: ${toolNames}`
 }
@@ -128,6 +129,8 @@ export function apply(ctx: Context, config: Config): void {
     'roundtable_request_decision',
     'roundtable_status',
     'roundtable_actions_clear',
+    'roundtable_start_review',
+    'roundtable_collect_review',
     'roundtable_set_budget',
     'roundtable_close',
     'roundtable_proxy_think',
