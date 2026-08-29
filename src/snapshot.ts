@@ -240,9 +240,16 @@ export async function collectMeetingSnapshots(
           plan: review.plan,
           viewpoints: review.viewpoints.map((viewpoint) => ({
             id: viewpoint.id,
+            utteranceId: viewpoint.utteranceId,
             nodeKey: viewpoint.nodeKey,
             content: viewpoint.content,
-            endorsed: viewpoint.endorsed,
+            status: viewpoint.status,
+            // 兼容派生：旧前端仍可读 endorsed。
+            endorsed: viewpoint.status === 'endorsed',
+            rejected: viewpoint.status === 'rejected',
+            quote: viewpoint.quote,
+            dimension: viewpoint.dimension,
+            seq: viewpoint.seq,
           })),
         },
         digest: aggregateUtterances(utterances),

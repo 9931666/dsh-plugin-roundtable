@@ -26,14 +26,14 @@ import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join } from 'node:path'
-import type { EdgeDirection, ReviewRecord, UserAction } from './types.ts'
+import type { EdgeDirection, UserAction } from './types.ts'
 import {
   appendUserAction,
-  endorseViewpoint,
   meetingDirOf,
   readMeeting,
   readReview,
   readUserActions,
+  setViewpointStatus,
   stateRootOf,
   withMeetingLock,
   writeMeeting,
@@ -98,6 +98,40 @@ async function withMeetingRpcLock<T>(
   if (workspace === undefined) return fail(`meeting "${meetingId}" not found in any workspace`)
   const stateRoot = stateRootOf(workspace, runtime.stateDir)
   return withMeetingLock(`meeting:${stateRoot}:${meetingId}`, () => operation(stateRoot))
+}
+
+/** 观点三态写入（V0.2.2）。幂等；状态变化时写结构化 user-action（V2 回写负载）。
+ *  P1 务实降级：connection 通道不暴露调用者 session 身份（handler 仅
+ *  endpoint/payload/signal），无法做 captainSessionId 校验——以「会议归属
+ *  校验（withMeetingRpcLock）+ 状态机校验（reviewing 阶段拒绝）」作为防线。 */
+async function applyViewpointStatus(
+  runtime: RoundTableRuntime,
+  meetingId: string,
+  viewpointId: string,
+  status: 'pending' | 'endorsed' | 'rejected',
+): Promise<RpcResult<{ changed: boolean; status: string }>> {
+  return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
+    const review = await readReview(stateRoot, meetingId)
+    if (review === undefined) return fail(`no review in progress for meeting "${meetingId}"`)
+    const viewpoint = review.viewpoints.find((candidate) => candidate.id === viewpointId)
+    if (viewpoint === undefined) return fail(`viewpoint "${viewpointId}" not found`)
+    if (review.status === 'reviewing') {
+      return fail('review is still collecting viewpoints — call roundtable_collect_review before endorsing or rejecting')
+    }
+    const changed = await setViewpointStatus(stateRoot, meetingId, viewpointId, status)
+    if (changed && status !== 'pending') {
+      const label = status === 'endorsed' ? '用户认定缺陷' : '用户驳回观点'
+      await appendUserAction(stateRoot, meetingId, {
+        id: randomUUID(),
+        ts: Date.now(),
+        kind: 'other',
+        nodeKey: viewpoint.nodeKey,
+        // V2：回写负载升级为结构化行 id（utteranceId#seq），主持人据此精确回改。
+        text: `${label}（针锋相对评审 ${viewpoint.id}）：${viewpoint.content.replace(/\s+/g, ' ').slice(0, 60)}`,
+      })
+    }
+    return ok({ changed, status })
+  })
 }
 
 /** Register the RoundTable RPC handler on the plugin's own channel. */
@@ -362,28 +396,24 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             })
           }
           case 'roundtable/review.endorse': {
-            // 用户点「支持」：认定该缺陷真实存在；直接更新 review.json，并写
-            // 一条 user-action 让主持人下一轮知晓（进入后续方案修改）。
+            // V0.2.1 兼容别名：映射到三态 setStatus('endorsed')。
             const body = payload as { meetingId?: unknown; viewpointId?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             const viewpointId = typeof body?.viewpointId === 'string' ? body.viewpointId : ''
             if (meetingId === '' || viewpointId === '') return fail('payload must be { meetingId, viewpointId }')
-            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
-              const review = await readReview(stateRoot, meetingId)
-              const viewpoint = review?.viewpoints.find((candidate) => candidate.id === viewpointId)
-              if (viewpoint === undefined) return fail(`viewpoint "${viewpointId}" not found`)
-              const changed = await endorseViewpoint(stateRoot, meetingId, viewpointId)
-              if (changed) {
-                await appendUserAction(stateRoot, meetingId, {
-                  id: randomUUID(),
-                  ts: Date.now(),
-                  kind: 'other',
-                  nodeKey: viewpoint.nodeKey,
-                  text: `用户认定缺陷（针锋相对评审）：${viewpoint.content.replace(/\s+/g, ' ').slice(0, 60)}`,
-                })
-              }
-              return ok({ endorsed: true })
-            })
+            return applyViewpointStatus(runtime, meetingId, viewpointId, 'endorsed')
+          }
+          case 'roundtable/review.setStatus': {
+            // V0.2.2 三态：pending/endorsed/rejected 可互切（支持可取消、驳回）。
+            const body = payload as { meetingId?: unknown; viewpointId?: unknown; status?: unknown } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const viewpointId = typeof body?.viewpointId === 'string' ? body.viewpointId : ''
+            const status = body?.status
+            if (meetingId === '' || viewpointId === '') return fail('payload must be { meetingId, viewpointId, status }')
+            if (status !== 'pending' && status !== 'endorsed' && status !== 'rejected') {
+              return fail('status must be "pending" | "endorsed" | "rejected"')
+            }
+            return applyViewpointStatus(runtime, meetingId, viewpointId, status)
           }
           default:
             return fail(`unknown endpoint: ${endpoint}`)

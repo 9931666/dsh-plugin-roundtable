@@ -383,10 +383,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }
   }, [meeting])
 
-  // 用户点「支持」：认定该缺陷真实存在（本地即时更新，RPC 持久化+通知主持人）。
-  const endorseViewpoint = (viewpointId: string): void => {
+  // 用户对观点表态（V0.2.2 三态：支持/驳回/取消；本地即时更新，RPC 持久化+通知主持人）。
+  const setViewpointStatus = (viewpointId: string, status: 'pending' | 'endorsed' | 'rejected'): void => {
     if (meeting === undefined) return
-    void rpc<{ endorsed: boolean }>('roundtable/review.endorse', { meetingId: meeting.id, viewpointId })
+    void rpc<{ changed: boolean; status: string }>('roundtable/review.setStatus', {
+      meetingId: meeting.id,
+      viewpointId,
+      status,
+    })
       .then((result) => {
         if (result.ok) {
           setMeetings((previous) => previous.map((candidate) => {
@@ -396,12 +400,21 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               review: {
                 ...candidate.review,
                 viewpoints: candidate.review.viewpoints.map((viewpoint) =>
-                  viewpoint.id === viewpointId ? { ...viewpoint, endorsed: true } : viewpoint,
+                  viewpoint.id === viewpointId
+                    ? { ...viewpoint, status, endorsed: status === 'endorsed', rejected: status === 'rejected' }
+                    : viewpoint,
                 ),
               },
             }
           }))
-          setToast({ kind: 'ok', text: translate('reviewSupportedToast') })
+          setToast({
+            kind: 'ok',
+            text: status === 'endorsed'
+              ? translate('reviewSupportedToast')
+              : status === 'rejected'
+                ? translate('reviewRejectedToast')
+                : translate('reviewPendingToast'),
+          })
         } else {
           setToast({ kind: 'err', text: result.error?.message ?? translate('reviewEndorseFailed') })
         }
@@ -1362,19 +1375,33 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                           <div className={styles.reviewItemHead}>
                             {brandAvatar(brand, 'list')}
                             <span className={styles.reviewNode}>{viewpoint.nodeKey}</span>
-                            {viewpoint.endorsed ? (
+                            <span className={styles.reviewDimension}>{viewpoint.dimension}</span>
+                            {viewpoint.status === 'endorsed' ? (
                               <span className={styles.reviewEndorsed}>{translate('reviewEndorsed')}</span>
-                            ) : null}
+                            ) : viewpoint.status === 'rejected' ? (
+                              <span className={styles.reviewRejected}>{translate('reviewRejected')}</span>
+                            ) : (
+                              <span className={styles.reviewPending}>{translate('reviewPending')}</span>
+                            )}
                           </div>
+                          {viewpoint.quote !== undefined && viewpoint.quote !== '' ? (
+                            <div className={styles.reviewQuote}>“{viewpoint.quote}”</div>
+                          ) : null}
                           <div className={styles.reviewContent}>{viewpoint.content}</div>
                           <div className={styles.reviewActions}>
                             <button
                               type="button"
-                              className={viewpoint.endorsed ? styles.reviewSupportDone : styles.reviewSupport}
-                              disabled={viewpoint.endorsed}
-                              onClick={() => endorseViewpoint(viewpoint.id)}
+                              className={viewpoint.status === 'endorsed' ? styles.reviewSupportDone : styles.reviewSupport}
+                              onClick={() => setViewpointStatus(viewpoint.id, viewpoint.status === 'endorsed' ? 'pending' : 'endorsed')}
                             >
-                              {viewpoint.endorsed ? translate('reviewSupported') : translate('reviewSupport')}
+                              {viewpoint.status === 'endorsed' ? translate('reviewSupported') : translate('reviewSupport')}
+                            </button>
+                            <button
+                              type="button"
+                              className={viewpoint.status === 'rejected' ? styles.reviewRejectDone : styles.reviewReject}
+                              onClick={() => setViewpointStatus(viewpoint.id, viewpoint.status === 'rejected' ? 'pending' : 'rejected')}
+                            >
+                              {viewpoint.status === 'rejected' ? translate('reviewRejectedDone') : translate('reviewReject')}
                             </button>
                           </div>
                         </div>

@@ -35,6 +35,7 @@ import { aggregateUtterances } from './aggregator.ts'
 import { proxyThinkingPrompt } from './proxy-thinking.ts'
 import { beginRound, ensureActive, estimateTokens, MeetingMutedError } from './budget.ts'
 import { deliverToNode, interruptNode, nodeActivity, spawnNode, steerCaptain, type MemberRuntimeConfig } from './members.ts'
+import { splitUtterance, type SplitLlmLike } from './review-split.ts'
 
 /** Resolved plugin config consumed by the tools. */
 export interface ToolsConfig {
@@ -50,6 +51,8 @@ export interface ToolsConfig {
   memberMaxDepth?: number
   /** Live expert answer limits from settings (read at every spawn). */
   getExpertLimits?: () => { maxTokens: number; maxOpinions: number }
+  /** 观点拆分 LLM 路由（V0.2.2）：collect_review 时把发言拆成独立观点。 */
+  reviewSplit?: { provider: string; model: string; maxOpinions: number }
 }
 
 const DEFAULT_MAX_ROUNDS = 10
@@ -850,12 +853,18 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const plan = String(args.plan ?? '').trim()
       if (question === '' || plan === '') throw new Error('question and plan must not be empty')
       return withCaptainLock(stateRoot, located.id, captain.id, 'start a review', async (fresh) => {
+        // S1 覆盖保护：进行中的评审（含已支持/驳回记录）不允许被静默覆盖。
+        const existing = await readReview(stateRoot, fresh.id)
+        if (existing !== undefined && existing.status !== 'done') {
+          throw new Error(`a review is already in progress (status ${existing.status}) — collect or finish it before starting a new one`)
+        }
         const now = Date.now()
         const review: ReviewRecord = {
           meetingId: fresh.id,
           question,
           plan,
           status: 'reviewing',
+          schemaVersion: 2,
           viewpoints: [],
           startedAt: now,
           updatedAt: now,
@@ -876,12 +885,13 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         additionalProperties: false,
         properties: {
           collected: { type: 'integer', required: true },
+          split_attempts: { type: 'integer', required: true },
           status: { type: 'string', required: true },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Review collected: ${value.collected} viewpoint(s), status ${value.status}.`,
+        text: `Review collected: ${value.collected} viewpoint(s) (${value.split_attempts} split attempt(s)), status ${value.status}.`,
       }],
     },
     async execute(_args, exec) {
@@ -891,26 +901,62 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       return withCaptainLock(stateRoot, located.id, captain.id, 'collect review', async (fresh) => {
         const review = await readReview(stateRoot, fresh.id)
         if (review === undefined) throw new Error('no review in progress — call roundtable_start_review first')
-        const existing = new Set(review.viewpoints.map((viewpoint) => viewpoint.id))
+        // 幂等键 = utteranceId 集合（观点拆分后 viewpoint.id 已变，不能用作去重）。
+        const collectedUtteranceIds = new Set(review.viewpoints.map((viewpoint) => viewpoint.utteranceId))
         const utterances = await readTranscript(stateRoot, fresh.id)
+        const llm = ctx.get('llm') as SplitLlmLike | undefined
+        const splitConfig = config.reviewSplit
         let collected = 0
+        let splitAttempts = 0
         for (const utterance of utterances) {
           if (utterance.nodeKey === CAPTAIN_KEY) continue
           if (utterance.kind !== 'speech' && utterance.kind !== 'proxy-thinking') continue
           if (utterance.ts < review.startedAt) continue
-          if (existing.has(utterance.id)) continue
-          review.viewpoints.push({
-            id: utterance.id,
-            nodeKey: utterance.nodeKey,
-            content: utterance.content,
-            endorsed: false,
-            ts: utterance.ts,
-          })
-          collected += 1
+          if (collectedUtteranceIds.has(utterance.id)) continue
+          const content = utterance.content.replace(/\s+/g, ' ').trim()
+          if (content === '') continue // 空发言跳过
+          // 观点拆分（三道防线）：任何失败整条兜底（seq=0、无 quote、维度=其他）。
+          let lines = null
+          if (llm !== undefined && splitConfig !== undefined) {
+            try {
+              lines = await splitUtterance(llm, splitConfig, utterance.nodeKey, content)
+              splitAttempts += 1
+            } catch {
+              lines = null
+            }
+          }
+          if (lines !== null && lines.length > 0) {
+            lines.forEach((line, index) => {
+              review.viewpoints.push({
+                id: `${utterance.id}#${index + 1}`,
+                utteranceId: utterance.id,
+                nodeKey: utterance.nodeKey,
+                content: line.content,
+                status: 'pending',
+                quote: line.quote,
+                dimension: line.dimension,
+                ts: utterance.ts,
+                seq: index + 1,
+              })
+              collected += 1
+            })
+          } else {
+            review.viewpoints.push({
+              id: `${utterance.id}#0`,
+              utteranceId: utterance.id,
+              nodeKey: utterance.nodeKey,
+              content,
+              status: 'pending',
+              dimension: '其他',
+              ts: utterance.ts,
+              seq: 0,
+            })
+            collected += 1
+          }
         }
         if (collected > 0) review.status = 'ready'
         await writeReview(stateRoot, fresh.id, review)
-        return { collected, status: review.status }
+        return { collected, split_attempts: splitAttempts, status: review.status }
       })
     },
   }))

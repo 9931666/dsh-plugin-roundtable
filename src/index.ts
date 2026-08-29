@@ -165,6 +165,13 @@ export function apply(ctx: Context, config: Config): void {
     maxNodes: resolved.maxNodes,
     defaultMode: resolved.defaultMode,
     memberMaxDepth: resolved.memberMaxDepth,
+    // 观点拆分 LLM 路由：默认 deepseek-official/deepseek-v4-flash（实测可用），
+    // 后续可配置化；不可用时 collect 自动整条兜底（三道防线②）。
+    reviewSplit: {
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash',
+      maxOpinions: 3,
+    },
     // Read live every spawn so a settings change applies to newly added
     // experts without a restart.
     getExpertLimits: () => {

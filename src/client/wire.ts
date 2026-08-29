@@ -87,12 +87,24 @@ export interface WireKbListing {
   files: WireKbEntry[]
 }
 
-/** 针锋相对评审：一个观点。 */
+/** 针锋相对评审：一个观点（V0.2.2 三态 + 拆分）。 */
 export interface WireReviewViewpoint {
   id: string
+  utteranceId: string
   nodeKey: string
   content: string
+  /** 三态：pending/endorsed/rejected。 */
+  status: 'pending' | 'endorsed' | 'rejected'
+  /** 兼容派生（旧视图仍可读）：status === 'endorsed'。 */
   endorsed: boolean
+  /** 派生：status === 'rejected'。 */
+  rejected: boolean
+  /** 原文引用子串（拆分观点可能有）。 */
+  quote?: string
+  /** 维度标签（默认"其他"）。 */
+  dimension: string
+  /** 发言内序号：0=整条未拆分。 */
+  seq: number
 }
 
 /** 针锋相对评审记录（快照携带，前端弹窗数据源）。 */

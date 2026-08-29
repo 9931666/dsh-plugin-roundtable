@@ -147,16 +147,25 @@ export interface Meeting {
   updatedAt: number
 }
 
-/** 针锋相对评审：一个观点（红队专家提的一条缺陷）。 */
+/** 针锋相对评审：一个观点（红队专家提的一条缺陷，可能是发言拆分而来）。 */
 export interface ReviewViewpoint {
+  /** 行 id：`${utteranceId}#${seq}`（拆分后 seq≥1；未拆分整条 seq=0）。 */
   id: string
+  /** 来源发言 id（collect 幂等键：同一发言只收集一次）。 */
+  utteranceId: string
   /** 提出该观点的专家节点 key。 */
   nodeKey: string
-  /** 缺陷内容（专家发言）。 */
+  /** 缺陷内容（单条观点文本）。 */
   content: string
-  /** 用户是否点击「支持」认定为真实缺陷。 */
-  endorsed: boolean
+  /** 三态：pending=未操作；endorsed=用户支持认定为真实缺陷；rejected=用户审阅后否定。可互切。 */
+  status: 'pending' | 'endorsed' | 'rejected'
+  /** 观点对应的原文引用子串（≤120 字符，无则 undefined）。 */
+  quote?: string
+  /** 维度标签（自由字符串，默认"其他"）。 */
+  dimension: string
   ts: number
+  /** 发言内序号：0=整条未拆分；≥1=拆分出的第 N 条。 */
+  seq: number
 }
 
 /** 针锋相对评审记录（`<meetingDir>/review.json`，独立文件防 meeting.json 竞态）。 */
@@ -168,6 +177,8 @@ export interface ReviewRecord {
   plan: string
   /** reviewing=评审进行中；ready=观点已收集，弹窗可展示；done=用户完成评审。 */
   status: 'reviewing' | 'ready' | 'done'
+  /** schema 版本：1=旧（endorsed 布尔）；2=三态 + 观点拆分（当前）。缺失视为 1。 */
+  schemaVersion: 1 | 2
   viewpoints: ReviewViewpoint[]
   startedAt: number
   updatedAt: number

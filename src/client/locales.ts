@@ -117,6 +117,12 @@ export type RoundTableKey =
   | 'reviewStatusReady'
   | 'reviewStatusReviewing'
   | 'reviewEndorsedCount'
+  | 'reviewPending'
+  | 'reviewRejected'
+  | 'reviewReject'
+  | 'reviewRejectedDone'
+  | 'reviewRejectedToast'
+  | 'reviewPendingToast'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -237,6 +243,12 @@ export const zh: Record<RoundTableKey, string> = {
   reviewStatusReady: '已就绪',
   reviewStatusReviewing: '评审中',
   reviewEndorsedCount: '已认定',
+  reviewPending: '待审/未表态',
+  reviewRejected: '已驳回',
+  reviewReject: '驳回',
+  reviewRejectedDone: '已驳回',
+  reviewRejectedToast: '已驳回该观点（审阅后否定）',
+  reviewPendingToast: '已取消标记',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -351,4 +363,10 @@ export const en: Record<RoundTableKey, string> = {
   reviewStatusReady: 'ready',
   reviewStatusReviewing: 'reviewing',
   reviewEndorsedCount: 'endorsed',
+  reviewPending: 'unreviewed',
+  reviewRejected: 'rejected',
+  reviewReject: 'Reject',
+  reviewRejectedDone: 'Rejected',
+  reviewRejectedToast: 'Rejected after review; it will not feed the plan revision',
+  reviewPendingToast: 'Marking cleared',
 }

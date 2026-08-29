@@ -154,15 +154,57 @@ export async function clearUserActions(stateRoot: string, meetingId: string): Pr
   return before.length
 }
 
-/** Read the 针锋相对 review record; undefined when absent. */
+/** Read the 针锋相对 review record; undefined when absent. Migrates old
+ *  schemaVersion-1 records (endorsed boolean, whole-utterance viewpoints) to
+ *  the current shape in memory — idempotent, no write-back (next writeReview
+ *  persists the upgraded shape). */
 export async function readReview(stateRoot: string, meetingId: string): Promise<ReviewRecord | undefined> {
   try {
     const raw = await readFile(join(meetingDirOf(stateRoot, meetingId), 'review.json'), 'utf8')
-    return JSON.parse(raw) as ReviewRecord
+    return normalizeReview(JSON.parse(raw) as ReviewRecord)
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
+}
+
+/** Idempotently upgrade a review record to schemaVersion 2 (in-memory only).
+ *  v1: viewpoint = {id(utterance id), nodeKey, content, endorsed, ts} →
+ *  v2: {id: `${utteranceId}#${seq}`, utteranceId, nodeKey, content,
+ *       status, quote?, dimension, ts, seq}. */
+export function normalizeReview(review: ReviewRecord): ReviewRecord {
+  if ((review.schemaVersion ?? 1) === 2) return review
+  const migrated: ReviewRecord = {
+    meetingId: review.meetingId,
+    question: review.question,
+    plan: review.plan,
+    status: review.status,
+    schemaVersion: 2,
+    viewpoints: review.viewpoints.map((viewpoint) => {
+      const legacy = viewpoint as unknown as {
+        id?: unknown
+        nodeKey?: unknown
+        content?: unknown
+        endorsed?: unknown
+        ts?: unknown
+      }
+      const utteranceId = typeof legacy.id === 'string' ? legacy.id : ''
+      const content = typeof legacy.content === 'string' ? legacy.content : ''
+      return {
+        id: `${utteranceId}#0`,
+        utteranceId,
+        nodeKey: typeof legacy.nodeKey === 'string' ? legacy.nodeKey : '',
+        content,
+        status: legacy.endorsed === true ? 'endorsed' : 'pending',
+        dimension: '其他',
+        ts: typeof legacy.ts === 'number' ? legacy.ts : Date.now(),
+        seq: 0,
+      }
+    }),
+    startedAt: review.startedAt,
+    updatedAt: review.updatedAt,
+  }
+  return migrated
 }
 
 /** Persist the review record (atomic). */
@@ -173,13 +215,19 @@ export async function writeReview(stateRoot: string, meetingId: string, review: 
   await writeJsonAtomic(join(dir, 'review.json'), review)
 }
 
-/** Set one viewpoint's endorsed flag; returns true when it changed. */
-export async function endorseViewpoint(stateRoot: string, meetingId: string, viewpointId: string): Promise<boolean> {
+/** Set one viewpoint's three-state status (pending/endorsed/rejected);
+ *  returns true when the value changed. */
+export async function setViewpointStatus(
+  stateRoot: string,
+  meetingId: string,
+  viewpointId: string,
+  status: 'pending' | 'endorsed' | 'rejected',
+): Promise<boolean> {
   const review = await readReview(stateRoot, meetingId)
   if (review === undefined) return false
   const viewpoint = review.viewpoints.find((candidate) => candidate.id === viewpointId)
-  if (viewpoint === undefined || viewpoint.endorsed) return false
-  viewpoint.endorsed = true
+  if (viewpoint === undefined || viewpoint.status === status) return false
+  viewpoint.status = status
   await writeReview(stateRoot, meetingId, review)
   return true
 }

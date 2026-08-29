@@ -1395,6 +1395,69 @@
   cursor: default;
 }
 
+.reviewDimension {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.reviewQuote {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.04);
+  border-left: 3px solid rgba(0, 0, 0, 0.15);
+  padding: 4px 8px;
+  border-radius: 0 6px 6px 0;
+  line-height: 1.5;
+}
+
+.reviewPending {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 500;
+}
+
+.reviewRejected {
+  font-size: 10px;
+  color: #2e7d32;
+  background: rgba(46, 125, 50, 0.08);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
+}
+
+.reviewReject {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(46, 125, 50, 0.45);
+  background: #ffffff;
+  color: #2e7d32;
+  cursor: pointer;
+  margin-left: 8px;
+}
+
+.reviewReject:hover {
+  background: rgba(46, 125, 50, 0.08);
+}
+
+.reviewRejectDone {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(46, 125, 50, 0.3);
+  background: rgba(46, 125, 50, 0.08);
+  color: #2e7d32;
+  cursor: default;
+  margin-left: 8px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .breathing {
     animation: none;
