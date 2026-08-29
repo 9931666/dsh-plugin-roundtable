@@ -1349,6 +1349,16 @@
   flex: 1;
 }
 
+.reviewSeq {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .reviewEndorsed {
   font-size: 10px;
   color: #c62828;

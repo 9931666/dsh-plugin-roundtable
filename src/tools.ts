@@ -35,7 +35,7 @@ import { aggregateUtterances } from './aggregator.ts'
 import { proxyThinkingPrompt } from './proxy-thinking.ts'
 import { beginRound, ensureActive, estimateTokens, MeetingMutedError } from './budget.ts'
 import { deliverToNode, interruptNode, nodeActivity, spawnNode, steerCaptain, type MemberRuntimeConfig } from './members.ts'
-import { splitUtterance, type SplitLlmLike } from './review-split.ts'
+import { splitByMarkers, splitUtterance, type SplitLlmLike } from './review-split.ts'
 
 /** Resolved plugin config consumed by the tools. */
 export interface ToolsConfig {
@@ -915,12 +915,20 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           if (collectedUtteranceIds.has(utterance.id)) continue
           const content = utterance.content.replace(/\s+/g, ' ').trim()
           if (content === '') continue // 空发言跳过
-          // 观点拆分（三道防线）：任何失败整条兜底（seq=0、无 quote、维度=其他）。
-          let lines = null
+          // 观点拆分（三道防线）：LLM 优先，任何失败 → 本地启发式兜底（零 token）→ 仍失败则整条兜底（seq=0）。
+          let lines: Awaited<ReturnType<typeof splitUtterance>> | null = null
           if (llm !== undefined && splitConfig !== undefined) {
             try {
               lines = await splitUtterance(llm, splitConfig, utterance.nodeKey, content)
               splitAttempts += 1
+            } catch {
+              lines = null
+            }
+          }
+          if (lines === null) {
+            // 无 LLM 或 LLM 拆分失败：按「观点 N（…）」段落结构本地切分，保证观点逐条可认定。
+            try {
+              lines = splitByMarkers(content)
             } catch {
               lines = null
             }

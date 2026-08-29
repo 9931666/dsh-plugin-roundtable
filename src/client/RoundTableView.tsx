@@ -52,6 +52,7 @@ const NODE_RADIUS = 34
 
 /** Provider → brand avatar (logo image if bundled, else abbreviation + brand color). */
 const PROVIDER_BRAND: Array<{ key: string; match: RegExp; abbr: string; color: string; dark?: boolean }> = [
+  { key: 'zai', match: /^zai\b|zai\//i, abbr: 'ZAI', color: '#3859FF' },
   { key: 'deepseek', match: /deepseek/i, abbr: 'DS', color: '#4D6BFE' },
   { key: 'glm', match: /glm|zhipu|z\.ai|智谱/i, abbr: 'GLM', color: '#3859FF' },
   { key: 'openai', match: /openai|gpt/i, abbr: 'GPT', color: '#10A37F' },
@@ -1388,6 +1389,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                           <div className={styles.reviewItemHead}>
                             {brandAvatar(brand, 'list')}
                             <span className={styles.reviewNode}>{viewpoint.nodeKey}</span>
+                            {viewpoint.seq > 0 ? <span className={styles.reviewSeq}>观点 {viewpoint.seq}</span> : null}
                             <span className={styles.reviewDimension}>{viewpoint.dimension}</span>
                             {viewpoint.status === 'endorsed' ? (
                               <span className={styles.reviewEndorsed}>{translate('reviewEndorsed')}</span>
