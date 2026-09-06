@@ -21,7 +21,6 @@ import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 // Declaration merge only: makes ctx.userQuestions visible.
 import type {} from '@deepseek-ai/dsh-user-questions'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { registerRoundTableTools } from './tools.ts'
 import { collectMeetingSnapshots } from './snapshot.ts'
 import { registerRpc, type RoundTableRuntime } from './rpc.ts'
@@ -58,7 +57,7 @@ export const Config: z<Config> = z.object({
 })
 
 /** Settings namespace for the runtime-tunable preferences (mode default, budget defaults). */
-export const SETTINGS_NAMESPACE = settingsNamespace('roundtable')
+export const SETTINGS_NAMESPACE = 'roundtable' as const
 
 /** User-tunable preference schema persisted under the `roundtable` namespace. */
 const PreferenceSchema = z.object({

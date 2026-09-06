@@ -2,7 +2,7 @@
  * Expert-node subagent lifecycle: spawn one continuable child per node,
  * deliver messages into its next FIFO turn, interrupt it, and observe its
  * live activity. Mirrors the AgentTeams member pattern against the
- * 0.1.1-rc.2 subagent seam.
+ * 0.1.2-rc.1 subagent seam.
  *
  * Node personas are the《全局协作总纲》plus node-specific rules; the charter
  * is injected so every node carries the four-section protocol.
@@ -161,14 +161,11 @@ export async function deliverToNode(
   signal: AbortSignal,
 ): Promise<boolean> {
   try {
-    await ctx.subagents.followup(
+    await ctx.subagents.sendMessage(
       captain,
       childId as SessionId,
       [{ type: 'text', text }],
-      {
-        source: { kind: 'plugin', plugin: 'dsh-plugin-roundtable' },
-        signal,
-      },
+      { signal },
     )
     return true
   } catch (error: unknown) {

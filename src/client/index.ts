@@ -11,7 +11,7 @@
  * @module @huanlin/dsh-plugin-roundtable/client
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
 import type { RpcResult } from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the conversation SlotMap merge ('conversation.view').
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -34,7 +34,7 @@ interface ConnectionHandle {
   }
 }
 
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'roundtable: dictionaries')
 
   const connection = (ctx as unknown as { connection?: ConnectionHandle }).connection

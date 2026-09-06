@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
-  <img src="https://img.shields.io/badge/version-v0.2.2-blue" alt="v0.2.2">
+  <img src="https://img.shields.io/badge/version-v0.2.1-blue" alt="v0.2.1">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
 
@@ -60,7 +60,7 @@
 ## 安装
 
 > [!NOTE]
-> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（0.1.1-rc.2+）。
+> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.1.2-rc.1+**；v0.2.1 起适配 0.1.2-rc.1 的 Cordis 4.0.2 / dsh 客户端架构，不再兼容 0.1.1-rc.2）。
 
 ### 从源码构建
 
