@@ -1057,7 +1057,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'roundtable_export_review',
-    description: 'Export the full 针锋相对 review record (all passes, viewpoints, endorsements, reject reasons, revision summaries) as a Markdown deliverable for the user to keep or paste into an issue. Requires the captain.',
+    description: 'Export the full 针锋相对 review record (all passes, viewpoints, endorsements, reject reasons, revision summaries) as a Markdown deliverable with a prefilled issue header (plugin version, mode, expert providers/models) — ready to paste into a GitHub issue or keep as a review record. Requires the captain.',
     parameters: {},
     output: {
       schema: {
@@ -1076,7 +1076,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       return withCaptainLock(stateRoot, located.id, captain.id, 'export the review', async (fresh) => {
         const review = await readReview(stateRoot, fresh.id)
         if (review === undefined) throw new Error('no review record yet — call roundtable_start_review first')
-        return { markdown: renderReviewMarkdown(review) }
+        return { markdown: renderReviewMarkdown(review, fresh) }
       })
     },
   }))
@@ -1240,12 +1240,24 @@ function evidenceLine(evidence: { kind: string; text: string } | undefined): str
   return `\n  - **${label}**：${evidence.text}`
 }
 
-/** Render the full review record as a Markdown deliverable (C5). */
-function renderReviewMarkdown(review: ReviewRecord): string {
+/** Render the full review record as a Markdown deliverable (C5/E2).
+ *  The header carries prefilled issue metadata: plugin version, meeting mode,
+ *  expert providers/models and budget usage — ready to paste into a
+ *  GitHub issue. */
+function renderReviewMarkdown(review: ReviewRecord, meeting: Meeting): string {
   const out: string[] = []
   out.push('# 针锋相对评审记录', '')
-  out.push(`- 评审轮次：${review.reviewPass} / ${review.maxReviewPass}`)
-  out.push(`- 状态：${review.status === 'done' ? '已完成' : review.status === 'ready' ? '待表态' : '收集中'}`)
+  out.push('---')
+  out.push('<!-- 以下为预填的 issue 元数据，可整段作为 GitHub issue 模板 -->')
+  out.push(`- **插件**：@huanlin/dsh-plugin-roundtable v0.2.2（DeepSeek Harness 0.1.2-rc.1+）`)
+  out.push(`- **协作模式**：${meeting.mode}`)
+  const expertRoutes = meeting.nodes
+    .filter((node) => node.status !== 'removed')
+    .map((node) => `${node.key}（${node.provider ?? '-'}/${node.model ?? '-'}）`)
+  out.push(`- **专家**：${expertRoutes.length === 0 ? '-' : expertRoutes.join('、')}`)
+  out.push(`- **预算用量**：${meeting.budget.usedRounds}/${meeting.budget.maxRounds} 轮 · ${meeting.budget.usedTokens}/${meeting.budget.maxTokens} token`)
+  out.push('---', '')
+  out.push(`## 评审轮次 ${review.reviewPass}/${review.maxReviewPass} · ${review.status === 'done' ? '已完成' : review.status === 'ready' ? '待表态' : '收集中'}`)
   out.push('', '## 原始问题', '', review.question, '', '## 本轮方案（待攻击对象）', '', review.plan, '')
   const endorsed = review.viewpoints.filter((viewpoint) => viewpoint.status === 'endorsed')
   const rejected = review.viewpoints.filter((viewpoint) => viewpoint.status === 'rejected')
