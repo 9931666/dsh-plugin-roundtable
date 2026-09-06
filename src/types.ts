@@ -148,6 +148,14 @@ export interface Meeting {
   updatedAt: number
 }
 
+/** 观点证据分级（C1）：代码/bug 类缺陷须给可复现步骤；设计类缺陷给论证链。 */
+export interface ReviewEvidence {
+  /** 证据类型：repro=可复现步骤；argument=论证链（设计类缺陷适用）。 */
+  kind: 'repro' | 'argument'
+  /** 证据正文：复现步骤（1. 2. 3.）或论证链。≤600 字符。 */
+  text: string
+}
+
 /** 针锋相对评审：一个观点（红队专家提的一条缺陷，可能是发言拆分而来）。 */
 export interface ReviewViewpoint {
   /** 行 id：`${utteranceId}#${seq}`（拆分后 seq≥1；未拆分整条 seq=0）。 */
@@ -160,6 +168,10 @@ export interface ReviewViewpoint {
   content: string
   /** 三态：pending=未操作；endorsed=用户支持认定为真实缺陷；rejected=用户审阅后否定。可互切。 */
   status: 'pending' | 'endorsed' | 'rejected'
+  /** 驳回理由（C2：驳回必填；支持后改回 pending/rejected 不清除，供追溯）。 */
+  rejectReason?: string
+  /** 证据分级（C1）：LLM 拆分时按发言内容提取；无则 undefined。 */
+  evidence?: ReviewEvidence
   /** 观点对应的原文引用子串（≤120 字符，无则 undefined）。 */
   quote?: string
   /** 维度标签（自由字符串，默认"其他"）。 */
@@ -167,6 +179,39 @@ export interface ReviewViewpoint {
   ts: number
   /** 发言内序号：0=整条未拆分；≥1=拆分出的第 N 条。 */
   seq: number
+}
+
+/** 一轮已完成的评审快照（闭环复审 history 项）。 */
+export interface ReviewPassSnapshot {
+  pass: number
+  question: string
+  plan: string
+  viewpoints: ReviewViewpoint[]
+  finishedAt: number
+  /** 该轮修订说明（主持人 finish_review 时附，供下一轮核对旧缺陷是否修复）。 */
+  revisedPlanSummary?: string
+}
+
+/** 一条轻量用户反馈（E1/E3，工作区级 feedback.jsonl，匿名）。
+ *  只记录结构化使用事实 + 用户主动填写的一句说明；绝不记录对话内容。 */
+export interface FeedbackEntry {
+  id: string
+  ts: number
+  /** 会议 id（仅稳定 id，不存会议名/内容，便于去重）。 */
+  meetingId: string
+  /** 协作模式（orchestrated / egalitarian / redteam）。 */
+  mode: string
+  /** 专家 provider 去重列表（如 ["zai-coding-cn"]）。 */
+  providers: string[]
+  /** 专家 model 去重列表（如 ["glm-5.2"]）。 */
+  models: string[]
+  /** 会议结束时预算用量。 */
+  usedRounds: number
+  usedTokens: number
+  /** 1 键有用度：good / meh / bad。 */
+  rating: 'good' | 'meh' | 'bad'
+  /** 可选一句"最卡的点"（用户主动填写）。 */
+  note?: string
 }
 
 /** 针锋相对评审记录（`<meetingDir>/review.json`，独立文件防 meeting.json 竞态）。 */
@@ -178,9 +223,17 @@ export interface ReviewRecord {
   plan: string
   /** reviewing=评审进行中；ready=观点已收集，弹窗可展示；done=用户完成评审。 */
   status: 'reviewing' | 'ready' | 'done'
+  /** 闭环复审（C3）：当前第几轮评审（首轮 = 1；每轮定稿后再开下一轮 +1）。 */
+  reviewPass: number
+  /** 闭环复审（C3）：最大评审轮数（首轮 + 最多复审 2 次 = 3）；达到上限后再想继续须用户显式批准。 */
+  maxReviewPass: number
+  /** 之前各轮已定稿的评审快照（闭环核对"旧缺陷是否修复"的依据）。 */
+  history: ReviewPassSnapshot[]
   /** schema 版本：1=旧（endorsed 布尔）；2=三态 + 观点拆分（当前）。缺失视为 1。 */
   schemaVersion: 1 | 2
   viewpoints: ReviewViewpoint[]
   startedAt: number
   updatedAt: number
+  /** 完成评审的时间（status → done 时写）。 */
+  finishedAt?: number
 }

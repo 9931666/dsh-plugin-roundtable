@@ -87,6 +87,12 @@ export interface WireKbListing {
   files: WireKbEntry[]
 }
 
+/** 观点证据分级（C1）：repro=可复现步骤；argument=论证链。 */
+export interface WireReviewEvidence {
+  kind: 'repro' | 'argument'
+  text: string
+}
+
 /** 针锋相对评审：一个观点（V0.2.2 三态 + 拆分）。 */
 export interface WireReviewViewpoint {
   id: string
@@ -99,6 +105,10 @@ export interface WireReviewViewpoint {
   endorsed: boolean
   /** 派生：status === 'rejected'。 */
   rejected: boolean
+  /** 驳回理由（C2：驳回必填；前端在 rejected 状态下展示）。 */
+  rejectReason?: string
+  /** 证据分级（C1）。 */
+  evidence?: WireReviewEvidence
   /** 原文引用子串（拆分观点可能有）。 */
   quote?: string
   /** 维度标签（默认"其他"）。 */
@@ -110,9 +120,25 @@ export interface WireReviewViewpoint {
 /** 针锋相对评审记录（快照携带，前端弹窗数据源）。 */
 export interface WireReview {
   status: string
+  reviewPass: number
+  maxReviewPass: number
   question: string
   plan: string
   viewpoints: WireReviewViewpoint[]
+}
+
+/** 一条匿名反馈（E1/E3：设置页列表展示）。 */
+export interface WireFeedbackEntry {
+  id: string
+  ts: number
+  meetingId: string
+  mode: string
+  providers: string[]
+  models: string[]
+  usedRounds: number
+  usedTokens: number
+  rating: 'good' | 'meh' | 'bad'
+  note?: string
 }
 
 export interface WireUtterance {
@@ -156,6 +182,8 @@ export interface RoundTablePrefs {
   expertMaxTokens: number
   /** 专家每轮最多提几条意见，0 = 不限制。 */
   expertMaxOpinions: number
+  /** E1/E4 反馈：会议结束后是否询问轻量反馈；false = 永久关闭。 */
+  feedbackEnabled: boolean
 }
 
 /**

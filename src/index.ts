@@ -69,6 +69,8 @@ const PreferenceSchema = z.object({
   expertMaxTokens: z.natural().default(0),
   /** 专家每轮最多提几条意见，0 = 不限制。 */
   expertMaxOpinions: z.natural().default(0),
+  /** E1/E4 反馈：会议结束后是否询问轻量反馈（默认开，可在设置页关闭）。 */
+  feedbackEnabled: z.boolean().default(true),
 })
 
 /** The model-facing usage policy: when and how to drive RoundTable. */
@@ -83,7 +85,7 @@ function usageSectionText(toolNames: string): string {
 7. Watch the budget in roundtable_status. A muted (闭麦) meeting can be topped up with roundtable_set_budget. Present the consolidated result, then roundtable_close the meeting.
 8. UI edits never touch meeting state directly: expert changes made in the Web UI (add/remove expert) are recorded as pending lines in the meeting's user-actions.jsonl (one JSON per line; read the "text" field). At the start of every round check roundtable_status for pending_actions: when present, execute each line with the matching roundtable_* tool (roundtable_add_node / roundtable_remove_node / ...), and only after EVERY action succeeded call roundtable_actions_clear to empty the file. If one action fails, keep the record and explain the failure in your reply — never clear a partially-executed file.
 9. Knowledge-base relay (主持人中转): the meeting's knowledge-base directory is recorded in the meeting state (kb_path, shown in roundtable_status). When an expert needs reference material, YOU read the specific file(s) with your file tools and relay the content to the expert — never copy the whole library. Read on demand, prefer summaries, and cap single-file size to avoid double token cost (you read + expert reads). A "已修改知识库部分内容" pending action means the KB changed: re-browse it to refresh your understanding.
-10. 针锋相对 (adversarial review): after you and the user settle a concrete plan, ASK whether they want to start this mode. If yes: call roundtable_start_review with the user's original question and the settled plan, then add red-team experts (role 红队审查) whose ONLY job is to attack the plan (no alternative proposals). When the experts have spoken, call roundtable_collect_review to gather their objections into the review record; the Web review window then opens automatically. The user clicks 「支持」 on real flaws — those endorsements arrive as pending user actions ("用户认定缺陷…"), so when you revise the plan next round, treat them as a known-flaws checklist.
+10. 针锋相对 (adversarial review): after you and the user settle a concrete plan, ASK whether they want to start this mode. If yes: call roundtable_start_review with the user's original question and the settled plan, then add red-team experts (role 红队审查) whose ONLY job is to attack the plan (no alternative proposals). When the experts have spoken, call roundtable_collect_review to gather their objections into the review record; the Web review window then opens automatically. The user clicks 「支持」 on real flaws and must type a reason when 「驳回」 (驳回必填理由) — endorsements arrive as pending user actions ("用户认定缺陷…"), so treat them as a known-flaws checklist when you revise the plan. After the user finishes and you have revised the plan, call roundtable_finish_review (附上修订说明) to close the pass. Closed loop (闭环复审, C3): a review may run at most 3 passes total (first + up to 2 re-reviews, max_review_pass=3); each re-review is started again with roundtable_start_review and must only check whether the previous pass's endorsed flaws were fixed — do NOT let experts introduce brand-new scoring. When the cap is reached you may continue only after the user explicitly approves (user_approved_extra_pass=true). Present the consolidated result, and export the record with roundtable_export_review into a Markdown deliverable the user can keep or paste into an issue.
 
 Tools: ${toolNames}`
 }
@@ -130,6 +132,8 @@ export function apply(ctx: Context, config: Config): void {
     'roundtable_actions_clear',
     'roundtable_start_review',
     'roundtable_collect_review',
+    'roundtable_finish_review',
+    'roundtable_export_review',
     'roundtable_set_budget',
     'roundtable_close',
     'roundtable_proxy_think',
@@ -155,6 +159,7 @@ export function apply(ctx: Context, config: Config): void {
       showAllMeetings: true,
       expertMaxTokens: 0,
       expertMaxOpinions: 0,
+      feedbackEnabled: true,
     },
   }
 

@@ -16,6 +16,8 @@ export interface SplitLine {
   content: string
   quote?: string
   dimension: string
+  /** 证据分级（C1）：代码/bug 类 = repro（可复现步骤）；设计类 = argument（论证链）。 */
+  evidence?: { kind: 'repro' | 'argument'; text: string }
 }
 
 /** 拆分调用的模型路由配置（默认 deepseek-official/deepseek-v4-flash，实测可用）。 */
@@ -59,6 +61,16 @@ const SPLIT_TOOL = {
             content: { type: 'string', description: '单条观点/缺陷的完整表述。' },
             quote: { type: 'string', description: '发言原文中与该观点对应的子串（可选，必须逐字来自发言原文）。' },
             dimension: { type: 'string', description: '维度标签，如 交互/数据/安全/性能/兼容/流程（不确定用"其他"）。' },
+            evidence: {
+              type: 'object',
+              description: '证据分级（C1）：代码/bug 类缺陷填 repro（附可复现步骤 1. 2. 3.）；设计类缺陷填 argument（附论证链，不编造伪复现步骤）。无法给出证据时省略该字段。',
+              additionalProperties: false,
+              properties: {
+                kind: { type: 'string', enum: ['repro', 'argument'], description: 'repro=可复现步骤（代码/bug 类）；argument=论证链（设计类）。' },
+                text: { type: 'string', description: '证据正文：复现步骤（编号 1. 2. 3.）或论证链，≤600 字符。' },
+              },
+              required: ['kind', 'text'],
+            },
           },
           required: ['content', 'dimension'],
         },
@@ -178,7 +190,7 @@ export async function splitUtterance(
 ): Promise<SplitLine[] | null> {
   const trimmed = content.replace(/\s+/g, ' ').trim()
   if (trimmed === '') return null
-  const system = '你是 RoundTable「针锋相对」评审的观点拆分器。把下面一条红队专家发言拆成 1~3 条独立观点，每条观点只包含一个缺陷，不得发明原文没有的内容。必须调用 split_redteam_viewpoint 工具返回结构化结果。'
+  const system = '你是 RoundTable「针锋相对」评审的观点拆分器。把下面一条红队专家发言拆成 1~3 条独立观点，每条观点只包含一个缺陷，不得发明原文没有的内容。对每条观点给出证据分级（C1）：代码/bug 类缺陷的 evidence.kind=repro 并写可复现步骤（1. 2. 3.）；设计类缺陷的 evidence.kind=argument 并写论证链——禁止为设计类缺陷编造"运行某命令即可复现"这类伪复现步骤。无法从原文提取证据时省略 evidence 字段。必须调用 split_redteam_viewpoint 工具返回结构化结果。'
   const raw = await callSplitLlm(llm, config, system, `专家 ${nodeKey} 的发言：\n${trimmed}`)
   if (raw !== null) {
     let parsed: unknown
@@ -191,7 +203,7 @@ export async function splitUtterance(
     if (Array.isArray(list) && list.length > 0) {
       const lines: SplitLine[] = []
       for (const item of list) {
-        const obj = item as { content?: unknown; quote?: unknown; dimension?: unknown } | null | undefined
+        const obj = item as { content?: unknown; quote?: unknown; dimension?: unknown; evidence?: unknown } | null | undefined
         const line = typeof obj?.content === 'string' ? obj.content.replace(/\s+/g, ' ').trim() : ''
         if (line === '') continue
         let quote: string | undefined
@@ -202,7 +214,15 @@ export async function splitUtterance(
         const dimension = typeof obj?.dimension === 'string' && obj.dimension.trim() !== ''
           ? obj.dimension.trim().slice(0, 20)
           : '其他'
-        lines.push({ content: line, quote, dimension })
+        let evidence: SplitLine['evidence']
+        const ev = obj?.evidence as { kind?: unknown; text?: unknown } | null | undefined
+        if (ev !== null && typeof ev === 'object'
+          && (ev.kind === 'repro' || ev.kind === 'argument')
+          && typeof ev.text === 'string') {
+          const text = ev.text.replace(/\s+/g, ' ').trim()
+          if (text !== '') evidence = { kind: ev.kind, text: text.slice(0, 600) }
+        }
+        lines.push({ content: line, quote, dimension, evidence })
         if (lines.length >= Math.max(1, config.maxOpinions)) break
       }
       if (lines.length > 0) return lines

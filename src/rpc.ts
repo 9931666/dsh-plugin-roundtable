@@ -26,10 +26,14 @@ import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join } from 'node:path'
-import type { EdgeDirection, UserAction } from './types.ts'
+import type { EdgeDirection, FeedbackEntry, UserAction } from './types.ts'
 import {
+  appendFeedback,
   appendUserAction,
+  clearFeedback,
+  clearFeedbackForMeeting,
   meetingDirOf,
+  readFeedback,
   readMeeting,
   readReview,
   readUserActions,
@@ -56,6 +60,8 @@ export interface RoundTablePreferences {
   readonly expertMaxTokens: number
   /** 专家每轮最多提几条意见，0 = 不限制。 */
   readonly expertMaxOpinions: number
+  /** E1/E4 反馈：会议结束后是否询问轻量反馈；false = 永久关闭（设置页可改）。 */
+  readonly feedbackEnabled: boolean
 }
 
 /** Holder shared between the settings fiber and the RPC fiber. */
@@ -101,6 +107,7 @@ async function withMeetingRpcLock<T>(
 }
 
 /** 观点三态写入（V0.2.2）。幂等；状态变化时写结构化 user-action（V2 回写负载）。
+ *  驳回必须附理由（C2），由 setViewpointStatus 强制非空。
  *  P1 务实降级：connection 通道不暴露调用者 session 身份（handler 仅
  *  endpoint/payload/signal），无法做 captainSessionId 校验——以「会议归属
  *  校验（withMeetingRpcLock）+ 状态机校验（reviewing 阶段拒绝）」作为防线。 */
@@ -109,6 +116,7 @@ async function applyViewpointStatus(
   meetingId: string,
   viewpointId: string,
   status: 'pending' | 'endorsed' | 'rejected',
+  rejectReason?: string,
 ): Promise<RpcResult<{ changed: boolean; status: string }>> {
   return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
     const review = await readReview(stateRoot, meetingId)
@@ -118,16 +126,27 @@ async function applyViewpointStatus(
     if (review.status === 'reviewing') {
       return fail('review is still collecting viewpoints — call roundtable_collect_review before endorsing or rejecting')
     }
-    const changed = await setViewpointStatus(stateRoot, meetingId, viewpointId, status)
+    if (review.status === 'done') {
+      return fail('this review pass is finished — start a new pass (roundtable_start_review) to re-review')
+    }
+    let changed: boolean
+    try {
+      changed = await setViewpointStatus(stateRoot, meetingId, viewpointId, status, rejectReason)
+    } catch (error) {
+      return fail((error as Error).message)
+    }
     if (changed && status !== 'pending') {
       const label = status === 'endorsed' ? '用户认定缺陷' : '用户驳回观点'
+      const reasonText = status === 'rejected' && rejectReason !== undefined && rejectReason.trim() !== ''
+        ? `；理由：${rejectReason.trim().replace(/\s+/g, ' ').slice(0, 120)}`
+        : ''
       await appendUserAction(stateRoot, meetingId, {
         id: randomUUID(),
         ts: Date.now(),
         kind: 'other',
         nodeKey: viewpoint.nodeKey,
         // V2：回写负载升级为结构化行 id（utteranceId#seq），主持人据此精确回改。
-        text: `${label}（针锋相对评审 ${viewpoint.id}）：${viewpoint.content.replace(/\s+/g, ' ').slice(0, 60)}`,
+        text: `${label}（针锋相对评审 ${viewpoint.id}）${reasonText}：${viewpoint.content.replace(/\s+/g, ' ').slice(0, 60)}`,
       })
     }
     return ok({ changed, status })
@@ -151,6 +170,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               showAllMeetings: prefs.showAllMeetings,
               expertMaxTokens: prefs.expertMaxTokens ?? 0,
               expertMaxOpinions: prefs.expertMaxOpinions ?? 0,
+              feedbackEnabled: prefs.feedbackEnabled ?? true,
             })
           }
           case 'roundtable/prefs.set': {
@@ -172,6 +192,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
                 showAllMeetings: typeof patch.showAllMeetings === 'boolean' ? patch.showAllMeetings : base.showAllMeetings,
                 expertMaxTokens: clampLimit(patch.expertMaxTokens, base.expertMaxTokens ?? 0),
                 expertMaxOpinions: clampLimit(patch.expertMaxOpinions, base.expertMaxOpinions ?? 0),
+                feedbackEnabled: typeof patch.feedbackEnabled === 'boolean' ? patch.feedbackEnabled : (base.feedbackEnabled ?? true),
               }
               runtime.fallbackPrefs = next
               return ok<RoundTablePreferences>({
@@ -181,6 +202,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
                 showAllMeetings: next.showAllMeetings,
                 expertMaxTokens: next.expertMaxTokens,
                 expertMaxOpinions: next.expertMaxOpinions,
+                feedbackEnabled: next.feedbackEnabled,
               })
             }
             await runtime.scope.update(patch as object)
@@ -192,6 +214,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               showAllMeetings: next.showAllMeetings,
               expertMaxTokens: next.expertMaxTokens ?? 0,
               expertMaxOpinions: next.expertMaxOpinions ?? 0,
+              feedbackEnabled: next.feedbackEnabled ?? true,
             })
           }
           case 'roundtable/edge.set': {
@@ -405,7 +428,8 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
           }
           case 'roundtable/review.setStatus': {
             // V0.2.2 三态：pending/endorsed/rejected 可互切（支持可取消、驳回）。
-            const body = payload as { meetingId?: unknown; viewpointId?: unknown; status?: unknown } | undefined
+            // 驳回必填理由（C2）：payload.reject_reason 非空，由 setViewpointStatus 强制。
+            const body = payload as { meetingId?: unknown; viewpointId?: unknown; status?: unknown; reject_reason?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             const viewpointId = typeof body?.viewpointId === 'string' ? body.viewpointId : ''
             const status = body?.status
@@ -413,7 +437,73 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             if (status !== 'pending' && status !== 'endorsed' && status !== 'rejected') {
               return fail('status must be "pending" | "endorsed" | "rejected"')
             }
-            return applyViewpointStatus(runtime, meetingId, viewpointId, status)
+            const rejectReason = typeof body?.reject_reason === 'string' ? body.reject_reason : undefined
+            if (status === 'rejected' && (rejectReason === undefined || rejectReason.trim() === '')) {
+              return fail('rejecting a viewpoint requires a non-empty reject_reason (驳回必填理由)')
+            }
+            return applyViewpointStatus(runtime, meetingId, viewpointId, status, rejectReason)
+          }
+          case 'roundtable/feedback.append': {
+            // E1/E3 匿名反馈：前端在会议结束后询问，条目写工作区级 feedback.jsonl。
+            const body = payload as {
+              meetingId?: unknown
+              mode?: unknown
+              providers?: unknown
+              models?: unknown
+              usedRounds?: unknown
+              usedTokens?: unknown
+              rating?: unknown
+              note?: unknown
+            } | undefined
+            const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const mode = typeof body?.mode === 'string' ? body.mode : ''
+            if (meetingId === '' || mode === '') return fail('payload must be { meetingId, mode, rating, ... }')
+            const ratingRaw = typeof body?.rating === 'string' ? body.rating : ''
+            if (ratingRaw !== 'good' && ratingRaw !== 'meh' && ratingRaw !== 'bad') {
+              return fail('rating must be "good" | "meh" | "bad"')
+            }
+            const asStringList = (value: unknown): string[] =>
+              Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 20) : []
+            const note = typeof body?.note === 'string' ? body.note.trim().slice(0, 1000) : ''
+            const entry: FeedbackEntry = {
+              id: randomUUID(),
+              ts: Date.now(),
+              meetingId,
+              mode,
+              providers: asStringList(body?.providers),
+              models: asStringList(body?.models),
+              usedRounds: typeof body?.usedRounds === 'number' ? Math.max(0, Math.floor(body.usedRounds)) : 0,
+              usedTokens: typeof body?.usedTokens === 'number' ? Math.max(0, Math.floor(body.usedTokens)) : 0,
+              rating: ratingRaw,
+              note: note === '' ? undefined : note,
+            }
+            return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
+              // 先清掉该会议的历史条目再追加（同一会议只保留最新一条反馈）。
+              await clearFeedbackForMeeting(stateRoot, meetingId)
+              await appendFeedback(stateRoot, entry)
+              return ok({ id: entry.id })
+            })
+          }
+          case 'roundtable/feedback.list': {
+            const body = payload as { workspace?: unknown } | undefined
+            const workspace = typeof body?.workspace === 'string' ? body.workspace : ''
+            const roots = await feedbackStateRoots(runtime, workspace)
+            const entries: FeedbackEntry[] = []
+            for (const stateRoot of roots) {
+              entries.push(...await readFeedback(stateRoot))
+            }
+            entries.sort((a, b) => b.ts - a.ts)
+            return ok({ entries: entries.slice(0, 200) })
+          }
+          case 'roundtable/feedback.clear': {
+            const body = payload as { workspace?: unknown } | undefined
+            const workspace = typeof body?.workspace === 'string' ? body.workspace : ''
+            const roots = await feedbackStateRoots(runtime, workspace)
+            let cleared = 0
+            for (const stateRoot of roots) {
+              cleared += await clearFeedback(stateRoot)
+            }
+            return ok({ cleared })
           }
           default:
             return fail(`unknown endpoint: ${endpoint}`)
@@ -436,6 +526,30 @@ export interface KbEntry {
   ext: string
   size: number
   mtimeMs: number
+}
+
+/**
+ * Resolve the state roots whose feedback.jsonl should be read/cleared:
+ * every known workspace candidate (optionally narrowed to one named
+ * workspace). A candidate whose state root directory does not exist yet
+ * contributes nothing.
+ */
+async function feedbackStateRoots(runtime: RoundTableRuntime, workspaceName?: string): Promise<string[]> {
+  const { workspaceCandidates } = await import('./workspace-candidates.ts')
+  const { stat } = await import('node:fs/promises')
+  const candidates = workspaceCandidates()
+    .filter((candidate) => workspaceName === undefined || candidate.title === workspaceName)
+  const roots: string[] = []
+  for (const candidate of candidates) {
+    const root = stateRootOf(candidate.path, runtime.stateDir)
+    try {
+      const info = await stat(root)
+      if (info.isDirectory()) roots.push(root)
+    } catch {
+      // Directory not created yet: skip.
+    }
+  }
+  return roots
 }
 
 /**

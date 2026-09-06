@@ -1474,3 +1474,165 @@
     border-color: rgba(77, 107, 254, 0.6);
   }
 }
+
+.reviewPassBadge {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.reviewEvidence {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(25, 118, 210, 0.06);
+  border-left: 3px solid rgba(25, 118, 210, 0.35);
+  padding: 4px 8px;
+  border-radius: 0 6px 6px 0;
+  line-height: 1.5;
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+.reviewEvidenceLabel {
+  font-weight: 600;
+}
+
+.reviewRejectReason {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.03);
+  border-left: 3px solid rgba(0, 0, 0, 0.2);
+  padding: 4px 8px;
+  border-radius: 0 6px 6px 0;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.reviewRejectBox {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reviewRejectLabel {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.reviewRejectInput {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: inherit;
+  resize: vertical;
+  min-height: 34px;
+  font-family: inherit;
+}
+
+.reviewRejectActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.reviewImpactBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.reviewImpactWarn {
+  background: rgba(237, 108, 2, 0.1);
+  color: #b26a00;
+  font-weight: 500;
+}
+
+.feedbackBar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feedbackBarTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
+  line-height: 1.5;
+}
+
+.feedbackBarActions {
+  display: flex;
+  gap: 6px;
+}
+
+.feedbackRating {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(77, 107, 254, 0.4);
+  background: rgba(77, 107, 254, 0.06);
+  color: #4d6bfe;
+  cursor: pointer;
+}
+
+.feedbackRating:hover {
+  background: rgba(77, 107, 254, 0.14);
+}
+
+.feedbackBarNote {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: inherit;
+  font-family: inherit;
+}
+
+.feedbackBarFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.feedbackSkip {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.feedbackSkip:hover {
+  color: rgba(0, 0, 0, 0.8);
+}

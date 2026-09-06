@@ -85,6 +85,8 @@ export interface MeetingSnapshot {
   /** 针锋相对评审（无则 null）。 */
   review: {
     status: string
+    reviewPass: number
+    maxReviewPass: number
     question: string
     plan: string
     viewpoints: {
@@ -257,6 +259,8 @@ export async function collectMeetingSnapshots(
         pendingActions: userActions.map(wireAction),
         review: review === undefined ? null : {
           status: review.status,
+          reviewPass: review.reviewPass ?? 1,
+          maxReviewPass: review.maxReviewPass ?? 3,
           question: review.question,
           plan: review.plan,
           viewpoints: review.viewpoints.map((viewpoint) => ({
@@ -268,6 +272,8 @@ export async function collectMeetingSnapshots(
             // 兼容派生：旧前端仍可读 endorsed。
             endorsed: viewpoint.status === 'endorsed',
             rejected: viewpoint.status === 'rejected',
+            rejectReason: viewpoint.rejectReason,
+            evidence: viewpoint.evidence,
             quote: viewpoint.quote,
             dimension: viewpoint.dimension,
             seq: viewpoint.seq,

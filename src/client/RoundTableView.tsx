@@ -261,12 +261,30 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [kbContentChanged, setKbContentChanged] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const reviewAutoShown = useRef<string | null>(null)
+  // C2 驳回必填理由：当前正在填写驳回理由的观点 id（null = 无进行中的驳回输入）。
+  const [rejectingId, setRejectingId] = useState<string | null>(null)
+  const [rejectDraft, setRejectDraft] = useState('')
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(true)
+  // E1/E4：反馈开关（设置页持久化；默认开）。未知时先假设开，取到偏好后校正。
+  const [feedbackEnabled, setFeedbackEnabled] = useState(true)
+  // 已询问过反馈的会议 id（localStorage 记忆，避免每次轮询都弹）。
+  const [askedFeedback, setAskedFeedback] = useState<Set<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem('roundtable:feedback-asked')
+      const list = raw === null ? [] : JSON.parse(raw) as unknown
+      return new Set(Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : [])
+    } catch {
+      return new Set()
+    }
+  })
+  // 正在询问反馈的会议 id（null = 无）。
+  const [askFeedbackFor, setAskFeedbackFor] = useState<string | null>(null)
+  const [feedbackNote, setFeedbackNote] = useState('')
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const containerRef = useRef<HTMLDivElement | null>(null)
   const hoverTimer = useRef<number | null>(null)
@@ -303,10 +321,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // Load the 互通 preference once; it decides whether this tab lists every
   // meeting in the workspace (on) or only meetings this conversation started.
   useEffect(() => {
-    void rpc<{ showAllMeetings?: boolean }>('roundtable/prefs.get', {})
+    void rpc<{ showAllMeetings?: boolean; feedbackEnabled?: boolean }>('roundtable/prefs.get', {})
       .then((result) => {
-        if (result.ok && typeof result.value?.showAllMeetings === 'boolean') {
-          setShowAll(result.value.showAllMeetings)
+        if (result.ok) {
+          if (typeof result.value?.showAllMeetings === 'boolean') setShowAll(result.value.showAllMeetings)
+          if (typeof result.value?.feedbackEnabled === 'boolean') setFeedbackEnabled(result.value.feedbackEnabled)
         }
       })
       .catch(() => undefined)
@@ -381,6 +400,55 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // back to the first meeting when the selection is missing or unset.
   const meeting = meetings.find((candidate) => candidate.id === selectedId) ?? meetings[0]
 
+  // E1：会议结束（status ended）且反馈开启、本会议尚未问过 → 弹轻量反馈。
+  useEffect(() => {
+    if (meeting === undefined || !feedbackEnabled) return
+    if (meeting.status !== 'ended') return
+    if (askFeedbackFor !== null) return
+    if (askedFeedback.has(meeting.id)) return
+    // 带评审的会议在评审窗口关闭后仍属 ended；统一在 ended 时问一次即可。
+    setAskFeedbackFor(meeting.id)
+    setFeedbackNote('')
+  }, [meeting, feedbackEnabled, askedFeedback, askFeedbackFor])
+
+  const markFeedbackAsked = (meetingId: string): void => {
+    const next = new Set(askedFeedback)
+    next.add(meetingId)
+    setAskedFeedback(next)
+    try {
+      window.localStorage.setItem('roundtable:feedback-asked', JSON.stringify([...next]))
+    } catch {
+      // Storage unavailable: keep in-memory only.
+    }
+  }
+
+  // 提交反馈（E1/E3）：匿名结构化字段 + 可选一句说明。
+  const submitFeedback = (rating: 'good' | 'meh' | 'bad'): void => {
+    if (meeting === undefined || askFeedbackFor === null) return
+    const target = meetings.find((candidate) => candidate.id === askFeedbackFor)
+    const note = feedbackNote.trim()
+    void rpc<{ id: string }>('roundtable/feedback.append', {
+      meetingId: askFeedbackFor,
+      mode: target?.mode ?? meeting.mode,
+      providers: target?.nodes.map((node) => node.provider).filter((value) => value !== '') ?? [],
+      models: target?.nodes.map((node) => node.model).filter((value) => value !== '') ?? [],
+      usedRounds: target?.budget.usedRounds ?? 0,
+      usedTokens: target?.budget.usedTokens ?? 0,
+      rating,
+      note: note === '' ? undefined : note,
+    })
+      .then((result) => {
+        if (result.ok) {
+          markFeedbackAsked(askFeedbackFor)
+          setAskFeedbackFor(null)
+          setToast({ kind: 'ok', text: translate('feedbackAskSubmitted') })
+        } else {
+          setToast({ kind: 'err', text: result.error?.message ?? translate('feedbackAskFailed') })
+        }
+      })
+      .catch(() => setToast({ kind: 'err', text: translate('feedbackAskFailed') }))
+  }
+
   // 针锋相对：评审就绪（status=ready）时自动弹出评审窗口（每会议只自动弹一次）。
   useEffect(() => {
     if (meeting === undefined) return
@@ -392,12 +460,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   }, [meeting])
 
   // 用户对观点表态（V0.2.2 三态：支持/驳回/取消；本地即时更新，RPC 持久化+通知主持人）。
-  const setViewpointStatus = (viewpointId: string, status: 'pending' | 'endorsed' | 'rejected'): void => {
+  // 驳回必填理由（C2）：status='rejected' 时 rejectReason 必须非空，否则 RPC 拒绝。
+  const setViewpointStatus = (viewpointId: string, status: 'pending' | 'endorsed' | 'rejected', rejectReason?: string): void => {
     if (meeting === undefined) return
     void rpc<{ changed: boolean; status: string }>('roundtable/review.setStatus', {
       meetingId: meeting.id,
       viewpointId,
       status,
+      reject_reason: status === 'rejected' ? rejectReason : undefined,
     })
       .then((result) => {
         if (result.ok) {
@@ -409,7 +479,13 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                 ...candidate.review,
                 viewpoints: candidate.review.viewpoints.map((viewpoint) =>
                   viewpoint.id === viewpointId
-                    ? { ...viewpoint, status, endorsed: status === 'endorsed', rejected: status === 'rejected' }
+                    ? {
+                        ...viewpoint,
+                        status,
+                        endorsed: status === 'endorsed',
+                        rejected: status === 'rejected',
+                        rejectReason: status === 'rejected' ? rejectReason : viewpoint.rejectReason,
+                      }
                     : viewpoint,
                 ),
               },
@@ -898,7 +974,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                 {translate('reviewBadge')}
                 {meeting.review.status === 'ready'
                   ? ` · ${meeting.review.viewpoints.length}`
-                  : ` · ${translate('reviewStatusReviewing')}`}
+                  : meeting.review.status === 'done'
+                    ? ` · ${translate('reviewStatusDone')}`
+                    : ` · ${translate('reviewStatusReviewing')}`}
               </button>
             ) : null}
           </div>
@@ -1147,7 +1225,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               <button type="button" className={styles.reviewCard} onClick={() => setReviewOpen(true)}>
                 <div className={styles.reviewCardTitle}>{meeting.review.question}</div>
                 <div className={styles.reviewCardMeta}>
-                  {meeting.review.status === 'ready' ? translate('reviewStatusReady') : translate('reviewStatusReviewing')}
+                  {meeting.review.status === 'ready'
+                    ? translate('reviewStatusReady')
+                    : meeting.review.status === 'done'
+                      ? translate('reviewStatusDone')
+                      : translate('reviewStatusReviewing')}
                   {' · '}{meeting.review.viewpoints.length} {translate('reviewViewpoints')}
                   {' · '}{meeting.review.viewpoints.filter((viewpoint) => viewpoint.endorsed).length} {translate('reviewEndorsedCount')}
                 </div>
@@ -1367,6 +1449,13 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             <div className={styles.manageTitle}>
               {translate('reviewTitle')} · {meeting.name}
             </div>
+            {meeting.review!.reviewPass > 0 ? (
+              <div className={styles.manageHint}>
+                {translate('reviewPassBadge')
+                  .replace('{pass}', String(meeting.review!.reviewPass))
+                  .replace('{max}', String(meeting.review!.maxReviewPass))}
+              </div>
+            ) : null}
             <div className={styles.reviewBody}>
               <div className={styles.reviewLeft}>
                 <div className={styles.reviewSectionTitle}>{translate('reviewQuestion')}</div>
@@ -1378,6 +1467,23 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                 <div className={styles.reviewSectionTitle}>
                   {translate('reviewViewpoints')}（{meeting.review!.viewpoints.length}）
                 </div>
+                {meeting.review!.status === 'ready' ? (
+                  <div className={`${styles.reviewImpactBar} ${meeting.review!.viewpoints.filter((viewpoint) => viewpoint.endorsed).length >= 3 ? styles.reviewImpactWarn : ''}`}>
+                    <span>{translate('reviewImpactTitle')}</span>
+                    <span>
+                      {translate('reviewEndorsed')} {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.endorsed).length}
+                    </span>
+                    <span>
+                      {translate('reviewRejected')} {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.rejected).length}
+                    </span>
+                    <span>
+                      {translate('reviewPending')} {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.status === 'pending').length}
+                    </span>
+                    {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.endorsed).length >= 3
+                      ? <span>{translate('reviewImpactThresholdHint')}</span>
+                      : <span>{translate('reviewImpactOk')}</span>}
+                  </div>
+                ) : null}
                 <div className={styles.reviewList}>
                   {meeting.review!.viewpoints.length === 0 ? (
                     <div className={styles.panelEmpty}>{translate('reviewEmpty')}</div>
@@ -1403,21 +1509,88 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                             <div className={styles.reviewQuote}>“{viewpoint.quote}”</div>
                           ) : null}
                           <div className={styles.reviewContent}>{viewpoint.content}</div>
+                          {viewpoint.evidence !== undefined && viewpoint.evidence.text !== '' ? (
+                            <div className={styles.reviewEvidence}>
+                              <span className={styles.reviewEvidenceLabel}>
+                                {viewpoint.evidence.kind === 'repro'
+                                  ? `[${translate('reviewEvidenceRepro')}] `
+                                  : `[${translate('reviewEvidenceArgument')}] `}
+                              </span>
+                              {viewpoint.evidence.text}
+                            </div>
+                          ) : null}
+                          {viewpoint.status === 'rejected' && viewpoint.rejectReason !== undefined && viewpoint.rejectReason !== '' ? (
+                            <div className={styles.reviewRejectReason}>
+                              {translate('reviewReject')}：{viewpoint.rejectReason}
+                            </div>
+                          ) : null}
                           <div className={styles.reviewActions}>
-                            <button
-                              type="button"
-                              className={viewpoint.status === 'endorsed' ? styles.reviewSupportDone : styles.reviewSupport}
-                              onClick={() => setViewpointStatus(viewpoint.id, viewpoint.status === 'endorsed' ? 'pending' : 'endorsed')}
-                            >
-                              {viewpoint.status === 'endorsed' ? translate('reviewSupported') : translate('reviewSupport')}
-                            </button>
-                            <button
-                              type="button"
-                              className={viewpoint.status === 'rejected' ? styles.reviewRejectDone : styles.reviewReject}
-                              onClick={() => setViewpointStatus(viewpoint.id, viewpoint.status === 'rejected' ? 'pending' : 'rejected')}
-                            >
-                              {viewpoint.status === 'rejected' ? translate('reviewRejectedDone') : translate('reviewReject')}
-                            </button>
+                            {meeting.review!.status === 'done' ? null : (
+                              <>
+                                <button
+                                  type="button"
+                                  className={viewpoint.status === 'endorsed' ? styles.reviewSupportDone : styles.reviewSupport}
+                                  onClick={() => setViewpointStatus(viewpoint.id, viewpoint.status === 'endorsed' ? 'pending' : 'endorsed')}
+                                >
+                                  {viewpoint.status === 'endorsed' ? translate('reviewSupported') : translate('reviewSupport')}
+                                </button>
+                                {rejectingId === viewpoint.id ? (
+                                  <div className={styles.reviewRejectBox}>
+                                    <label className={styles.reviewRejectLabel}>{translate('reviewRejectReasonPrompt')}</label>
+                                    <textarea
+                                      className={styles.reviewRejectInput}
+                                      value={rejectDraft}
+                                      autoFocus
+                                      onChange={(event) => setRejectDraft(event.target.value)}
+                                      placeholder={translate('reviewRejectReasonPlaceholder')}
+                                    />
+                                    <div className={styles.reviewRejectActions}>
+                                      <button
+                                        type="button"
+                                        className={styles.reviewReject}
+                                        onClick={() => {
+                                          const reason = rejectDraft.trim()
+                                          if (reason === '') {
+                                            setToast({ kind: 'err', text: translate('reviewRejectReasonRequired') })
+                                            return
+                                          }
+                                          setViewpointStatus(viewpoint.id, 'rejected', reason)
+                                          setRejectingId(null)
+                                          setRejectDraft('')
+                                        }}
+                                      >
+                                        {translate('reviewRejectConfirm')}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={styles.reviewSupportDone}
+                                        onClick={() => {
+                                          setRejectingId(null)
+                                          setRejectDraft('')
+                                        }}
+                                      >
+                                        {translate('reviewRejectCancel')}
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className={viewpoint.status === 'rejected' ? styles.reviewRejectDone : styles.reviewReject}
+                                    onClick={() => {
+                                      if (viewpoint.status === 'rejected') {
+                                        setViewpointStatus(viewpoint.id, 'pending')
+                                      } else {
+                                        setRejectingId(viewpoint.id)
+                                        setRejectDraft('')
+                                      }
+                                    }}
+                                  >
+                                    {viewpoint.status === 'rejected' ? translate('reviewRejectedDone') : translate('reviewReject')}
+                                  </button>
+                                )}
+                              </>
+                            )}
                           </div>
                         </div>
                       )
@@ -1427,7 +1600,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               </div>
             </div>
             <div className={styles.manageFooter}>
-              <span className={styles.manageHint}>{translate('reviewHint')}</span>
+              <span className={styles.manageHint}>{translate('reviewHint')} {translate('reviewExportHint')}</span>
               <button type="button" className={styles.manageCloseBtn} onClick={() => setReviewOpen(false)}>
                 {translate('reviewClose')}
               </button>
@@ -1453,6 +1626,40 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           <button type="button" className={styles.contextMenuItemDanger} onClick={() => handleEdgeAction('remove')}>
             {translate('edgeRemove')}
           </button>
+        </div>
+      ) : null}
+      {askFeedbackFor !== null ? (
+        <div className={styles.feedbackBar}>
+          <div className={styles.feedbackBarTitle}>{translate('feedbackAskTitle')}</div>
+          <div className={styles.feedbackBarActions}>
+            <button type="button" className={styles.feedbackRating} onClick={() => submitFeedback('good')}>
+              {translate('feedbackAskGood')}
+            </button>
+            <button type="button" className={styles.feedbackRating} onClick={() => submitFeedback('meh')}>
+              {translate('feedbackAskMeh')}
+            </button>
+            <button type="button" className={styles.feedbackRating} onClick={() => submitFeedback('bad')}>
+              {translate('feedbackAskBad')}
+            </button>
+          </div>
+          <input
+            className={styles.feedbackBarNote}
+            value={feedbackNote}
+            placeholder={translate('feedbackAskNotePlaceholder')}
+            onChange={(event) => setFeedbackNote(event.target.value)}
+          />
+          <div className={styles.feedbackBarFooter}>
+            <button
+              type="button"
+              className={styles.feedbackSkip}
+              onClick={() => {
+                if (askFeedbackFor !== null) markFeedbackAsked(askFeedbackFor)
+                setAskFeedbackFor(null)
+              }}
+            >
+              {translate('feedbackAskSkip')}
+            </button>
+          </div>
         </div>
       ) : null}
       {fetchFailed === true ? <div className={styles.fetchFailed}>{translate('fetchFailed')}</div> : null}

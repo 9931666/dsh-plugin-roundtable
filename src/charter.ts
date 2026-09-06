@@ -22,7 +22,9 @@ export function buildCharter(meeting: Meeting): string {
         '- 目标：对主持人已定稿的方案挑毛病（红队审查），找出方案的真实缺陷与认知盲区。',
         '- 每位专家只负责找缺陷，严禁提出替代方案；指出问题要具体、可复现，不较真不抬杠。',
         '- 每条观点只聚焦一个缺陷，建议 1~3 条；如无缺陷可明确说明"暂无"。',
-        '- 主持人用 roundtable_start_review(question, plan) 记录议题与方案，专家发言后主持人用 roundtable_collect_review 收集观点，用户逐条「支持/驳回」。',
+        '- 观点证据分级（C1）：代码/bug 类缺陷必须附可复现步骤（"可复现：1. … 2. …"）；设计类缺陷附论证链（"论证：因为…所以…"），禁止为设计类缺陷编造伪复现步骤。',
+        '- 主持人用 roundtable_start_review(question, plan) 记录议题与方案，专家发言后主持人用 roundtable_collect_review 收集观点，用户逐条「支持/驳回」（驳回须附理由）。',
+        '- 闭环复审（C3）：用户在评审窗口表态后，主持人据此修订方案，再用 roundtable_finish_review 结束本轮。若开启下一轮复审，专家只核对上一轮已认定缺陷是否被修复，禁止引入全新打分项。',
       ]
     : []
   return [

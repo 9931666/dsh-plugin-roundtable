@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import type { RpcCaller, RoundTablePrefs } from './wire.ts'
+import type { RpcCaller, RoundTablePrefs, WireFeedbackEntry } from './wire.ts'
 import styles from './RoundTableSettings.module.css'
 
 export interface RoundTableSettingsInjected {
@@ -16,6 +16,13 @@ export interface RoundTableSettingsInjected {
 
 export interface RoundTableSettingsProps extends RoundTableSettingsInjected {}
 
+/** E1/E3 反馈的评分文案（列表元数据显示）。 */
+const RATING_LABEL: Record<WireFeedbackEntry['rating'], string> = {
+  good: '👍',
+  meh: '😐',
+  bad: '👎',
+}
+
 export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element {
   const { rpc, t } = props
   const [prefs, setPrefs] = useState<RoundTablePrefs | null>(null)
@@ -23,6 +30,22 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
   const [saveFailed, setSaveFailed] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState<WireFeedbackEntry[]>([])
+  const [feedbackLoadFailed, setFeedbackLoadFailed] = useState(false)
+  const [feedbackCleared, setFeedbackCleared] = useState(false)
+
+  const loadFeedback = useCallback((): void => {
+    void rpc<{ entries: WireFeedbackEntry[] }>('roundtable/feedback.list', {})
+      .then((result) => {
+        if (result.ok) {
+          setFeedback(Array.isArray(result.value?.entries) ? result.value.entries : [])
+          setFeedbackLoadFailed(false)
+        } else {
+          setFeedbackLoadFailed(true)
+        }
+      })
+      .catch(() => setFeedbackLoadFailed(true))
+  }, [rpc])
 
   const load = useCallback((): void => {
     void rpc<RoundTablePrefs>('roundtable/prefs.get', {})
@@ -39,7 +62,8 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
 
   useEffect(() => {
     load()
-  }, [load])
+    loadFeedback()
+  }, [load, loadFeedback])
 
   const patch = (next: Partial<RoundTablePrefs>): void => {
     setPrefs((previous) => previous === null ? null : { ...previous, ...next })
@@ -57,6 +81,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       showAllMeetings: prefs.showAllMeetings,
       expertMaxTokens: prefs.expertMaxTokens,
       expertMaxOpinions: prefs.expertMaxOpinions,
+      feedbackEnabled: prefs.feedbackEnabled,
     })
       .then((result) => {
         setSaving(false)
@@ -71,6 +96,29 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         setSaving(false)
         setSaveFailed(true)
       })
+  }
+
+  const clearFeedback = (): void => {
+    void rpc<{ cleared: number }>('roundtable/feedback.clear', {})
+      .then((result) => {
+        if (result.ok) {
+          setFeedback([])
+          setFeedbackCleared(true)
+        } else {
+          setFeedbackLoadFailed(true)
+        }
+      })
+      .catch(() => setFeedbackLoadFailed(true))
+  }
+
+  const formatTs = (ts: number): string => {
+    try {
+      const date = new Date(ts)
+      const pad = (value: number): string => String(value).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    } catch {
+      return String(ts)
+    }
   }
 
   if (prefs === null) {
@@ -166,6 +214,56 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
           }}
         />
         <div className={styles.hint}>{t('settingsExpertMaxOpinionsHint')}</div>
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.sectionTitle}>{t('feedbackTitle')}</div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('feedbackEnabled')}</label>
+        <label className={styles.switchRow}>
+          <input
+            type="checkbox"
+            className={styles.switchInput}
+            checked={prefs.feedbackEnabled !== false}
+            onChange={(event) => patch({ feedbackEnabled: event.target.checked })}
+          />
+          <span className={styles.switchTrack} aria-hidden="true" />
+          <span className={styles.switchLabel}>
+            {prefs.feedbackEnabled !== false ? t('settingsShowAllOn') : t('settingsShowAllOff')}
+          </span>
+        </label>
+        <div className={styles.hint}>{t('feedbackEnabledHint')}</div>
+        <div className={styles.feedbackNote}>{t('feedbackPrivacyNote')}</div>
+      </div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('feedbackListTitle')}</label>
+        {feedbackLoadFailed ? (
+          <div className={styles.note}>{t('feedbackLoadFailed')}</div>
+        ) : feedback.length === 0 ? (
+          <div className={styles.note}>{t('feedbackListEmpty')}</div>
+        ) : (
+          <div className={styles.feedbackList}>
+            {feedback.map((entry) => (
+              <div key={entry.id} className={styles.feedbackItem}>
+                <div className={styles.feedbackMeta}>
+                  {t('feedbackEntryMeta')
+                    .replace('{date}', formatTs(entry.ts))
+                    .replace('{mode}', entry.mode)
+                    .replace('{providers}', [...new Set([...entry.providers, ...entry.models])].join(', ') || '-')
+                    .replace('{rounds}', String(entry.usedRounds))
+                    .replace('{tokens}', String(entry.usedTokens))
+                    .replace('{rating}', RATING_LABEL[entry.rating] ?? entry.rating)}
+                </div>
+                {entry.note !== undefined && entry.note !== '' ? (
+                  <div className={styles.feedbackNoteText}>{entry.note}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+        <button type="button" className={styles.feedbackClearBtn} onClick={clearFeedback}>
+          {t('feedbackClear')}
+        </button>
+        {feedbackCleared ? <span className={styles.saved}>{t('feedbackCleared')}</span> : null}
       </div>
       <div className={styles.actions}>
         <button type="button" className={styles.saveButton} disabled={saving} onClick={save}>

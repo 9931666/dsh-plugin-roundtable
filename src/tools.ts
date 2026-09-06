@@ -826,10 +826,11 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'roundtable_start_review',
-    description: 'Start a 针锋相对 (adversarial) review of a settled plan: records the user\'s original question and the captain\'s plan into review.json, so the Web review window can show them. Call this AFTER the user agreed to start the mode and BEFORE/WHILE the red-team experts give their objections. Requires the captain.',
+    description: 'Start a 针锋相对 (adversarial) review pass of a settled plan: records the user\'s original question and the captain\'s plan into review.json, so the Web review window can show them. First pass = reviewPass 1. After a previous pass was finished (status done), calling this again starts the next review pass (reviewPass + 1, closed loop 闭环复审) and preserves the previous pass in history; the captain may open at most 2 re-review passes beyond the first (maxReviewPass 3). To go beyond the cap, the user must have explicitly approved: pass user_approved_extra_pass=true. Requires the captain.',
     parameters: {
       question: { type: 'string', required: true, description: 'The user\'s original question / topic.' },
       plan: { type: 'string', required: true, description: 'The settled plan and its explanation (the object under review).' },
+      user_approved_extra_pass: { type: 'boolean', description: 'Set true ONLY when the user explicitly approved exceeding the re-review cap (maxReviewPass). Never set on your own.' },
     },
     output: {
       schema: {
@@ -838,11 +839,13 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         properties: {
           review_id: { type: 'string', required: true },
           status: { type: 'string', required: true },
+          review_pass: { type: 'integer', required: true },
+          max_review_pass: { type: 'integer', required: true },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Review started (id ${value.review_id}, status ${value.status}). Tell the experts to attack ONLY the plan (red-team).`,
+        text: `Review started (id ${value.review_id}, status ${value.status}, review pass ${value.review_pass}/${value.max_review_pass}). Tell the experts to attack ONLY the plan (red-team).`,
       }],
     },
     async execute(args, exec) {
@@ -856,7 +859,14 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         // S1 覆盖保护：进行中的评审（含已支持/驳回记录）不允许被静默覆盖。
         const existing = await readReview(stateRoot, fresh.id)
         if (existing !== undefined && existing.status !== 'done') {
-          throw new Error(`a review is already in progress (status ${existing.status}) — collect or finish it before starting a new one`)
+          throw new Error(`a review is already in progress (status ${existing.status}) — finish it before starting a new pass`)
+        }
+        // 复审轮次（C3）：上一轮已 done → reviewPass+1；超上限须用户显式批准。
+        const previousPass = existing?.status === 'done' && typeof existing.reviewPass === 'number' ? existing.reviewPass : 0
+        const reviewPass = previousPass + 1
+        const maxReviewPass = existing?.maxReviewPass ?? 3
+        if (reviewPass > maxReviewPass && args.user_approved_extra_pass !== true) {
+          throw new Error(`re-review cap reached (pass ${reviewPass} > max ${maxReviewPass}) — ask the user to approve continuing, then retry with user_approved_extra_pass=true, or export and finish the review`)
         }
         const now = Date.now()
         const review: ReviewRecord = {
@@ -864,13 +874,23 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           question,
           plan,
           status: 'reviewing',
+          reviewPass,
+          maxReviewPass,
           schemaVersion: 2,
           viewpoints: [],
           startedAt: now,
           updatedAt: now,
+          // 保留上一轮快照（闭环核对"旧缺陷是否修复"的依据）。
+          history: existing?.status === 'done' ? [...(existing.history ?? []), {
+            pass: existing.reviewPass,
+            question: existing.question,
+            plan: existing.plan,
+            viewpoints: existing.viewpoints,
+            finishedAt: existing.finishedAt ?? now,
+          }] : [],
         }
         await writeReview(stateRoot, fresh.id, review)
-        return { review_id: fresh.id, status: review.status }
+        return { review_id: fresh.id, status: review.status, review_pass: review.reviewPass, max_review_pass: review.maxReviewPass }
       })
     },
   }))
@@ -943,6 +963,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
                 status: 'pending',
                 quote: line.quote,
                 dimension: line.dimension,
+                evidence: line.evidence,
                 ts: utterance.ts,
                 seq: index + 1,
               })
@@ -965,6 +986,97 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         if (collected > 0) review.status = 'ready'
         await writeReview(stateRoot, fresh.id, review)
         return { collected, split_attempts: splitAttempts, status: review.status }
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'roundtable_finish_review',
+    description: 'Finish the current 针锋相对 review pass: marks it done (closed loop 闭环 can then start the next pass with roundtable_start_review). Records remaining endorsed (已认定) defects as the known-flaws checklist. Call this after the user finished endorsing/rejecting viewpoints and you have revised the plan (or decided to stop). Requires the captain.',
+    parameters: {
+      revised_plan_summary: { type: 'string', description: 'Optional one-line summary of how the endorsed defects were addressed in the revised plan (写入历史，供下一轮核对).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', required: true },
+          review_pass: { type: 'integer', required: true },
+          endorsed_count: { type: 'integer', required: true },
+          can_review_again: { type: 'boolean', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Review pass ${value.review_pass} finished (status ${value.status}, ${value.endorsed_count} endorsed defect(s)). ${value.can_review_again ? 'You may start the next re-review pass with roundtable_start_review.' : 'Re-review cap reached — export the record and present the consolidated result.'}`,
+      }],
+    },
+    async execute(args, exec) {
+      const captain = requireCaptain(exec)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'finish the review', async (fresh) => {
+        const review = await readReview(stateRoot, fresh.id)
+        if (review === undefined) throw new Error('no review in progress — call roundtable_start_review first')
+        if (review.status === 'done') {
+          return { status: review.status, review_pass: review.reviewPass, endorsed_count: countEndorsed(review), can_review_again: review.reviewPass < review.maxReviewPass }
+        }
+        if (review.status === 'reviewing') {
+          throw new Error('review is still collecting viewpoints — call roundtable_collect_review before finishing')
+        }
+        review.status = 'done'
+        review.finishedAt = Date.now()
+        const summary = String(args.revised_plan_summary ?? '').trim()
+        if (summary !== '') {
+          // 本轮修订说明并入最后一条历史（无历史则新建），供下一轮"旧缺陷是否修复"核对。
+          const last = review.history.length > 0 ? review.history[review.history.length - 1] : undefined
+          if (last !== undefined && last.pass === review.reviewPass) {
+            last.revisedPlanSummary = summary
+          } else {
+            review.history.push({
+              pass: review.reviewPass,
+              question: review.question,
+              plan: review.plan,
+              viewpoints: review.viewpoints,
+              finishedAt: Date.now(),
+              revisedPlanSummary: summary,
+            })
+          }
+        }
+        await writeReview(stateRoot, fresh.id, review)
+        return {
+          status: review.status,
+          review_pass: review.reviewPass,
+          endorsed_count: countEndorsed(review),
+          can_review_again: review.reviewPass < review.maxReviewPass,
+        }
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'roundtable_export_review',
+    description: 'Export the full 针锋相对 review record (all passes, viewpoints, endorsements, reject reasons, revision summaries) as a Markdown deliverable for the user to keep or paste into an issue. Requires the captain.',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          markdown: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.markdown }],
+    },
+    async execute(_args, exec) {
+      const captain = requireCaptain(exec)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'export the review', async (fresh) => {
+        const review = await readReview(stateRoot, fresh.id)
+        if (review === undefined) throw new Error('no review record yet — call roundtable_start_review first')
+        return { markdown: renderReviewMarkdown(review) }
       })
     },
   }))
@@ -1107,4 +1219,66 @@ function renderStatus(value: Record<string, unknown>): string {
     ...recent.map((utterance) => `  [R${String(utterance.round)}] ${String(utterance.speaker)}${String(utterance.to ?? '') === '' ? '' : ` → ${String(utterance.to)}`}: ${String(utterance.content)}`),
   ]
   return lines.join('\n')
+}
+
+/** Count endorsed (已认定) viewpoints in the current pass. */
+function countEndorsed(review: ReviewRecord): number {
+  return review.viewpoints.filter((viewpoint) => viewpoint.status === 'endorsed').length
+}
+
+/** One-line viewpoint marker inside the exported markdown. */
+function viewpointStatusLabel(status: string): string {
+  if (status === 'endorsed') return '✅ 已认定'
+  if (status === 'rejected') return '❌ 已驳回'
+  return '⬜ 未表态'
+}
+
+/** Evidence line inside the exported markdown. */
+function evidenceLine(evidence: { kind: string; text: string } | undefined): string {
+  if (evidence === undefined) return ''
+  const label = evidence.kind === 'repro' ? '证据（可复现步骤）' : '证据（论证链）'
+  return `\n  - **${label}**：${evidence.text}`
+}
+
+/** Render the full review record as a Markdown deliverable (C5). */
+function renderReviewMarkdown(review: ReviewRecord): string {
+  const out: string[] = []
+  out.push('# 针锋相对评审记录', '')
+  out.push(`- 评审轮次：${review.reviewPass} / ${review.maxReviewPass}`)
+  out.push(`- 状态：${review.status === 'done' ? '已完成' : review.status === 'ready' ? '待表态' : '收集中'}`)
+  out.push('', '## 原始问题', '', review.question, '', '## 本轮方案（待攻击对象）', '', review.plan, '')
+  const endorsed = review.viewpoints.filter((viewpoint) => viewpoint.status === 'endorsed')
+  const rejected = review.viewpoints.filter((viewpoint) => viewpoint.status === 'rejected')
+  const pending = review.viewpoints.filter((viewpoint) => viewpoint.status === 'pending')
+  out.push(`## 本轮观点（${review.viewpoints.length} 条：已认定 ${endorsed.length} / 已驳回 ${rejected.length} / 未表态 ${pending.length}）`, '')
+  if (review.viewpoints.length === 0) {
+    out.push('（暂无观点）')
+  }
+  for (const viewpoint of review.viewpoints) {
+    out.push(
+      `- **[${viewpointStatusLabel(viewpoint.status)}]** 观点 ${viewpoint.seq}（${viewpoint.dimension}，来自 ${viewpoint.nodeKey}）`,
+      '',
+      `  ${viewpoint.content}`,
+      evidenceLine(viewpoint.evidence),
+    )
+    if (viewpoint.quote !== undefined) out.push(`\n  > 原文引用：${viewpoint.quote}`)
+    if (viewpoint.status === 'rejected' && viewpoint.rejectReason !== undefined) {
+      out.push(`\n  - **驳回理由**：${viewpoint.rejectReason}`)
+    }
+    out.push('')
+  }
+  if (review.history !== undefined && review.history.length > 0) {
+    out.push('---', '', '## 历史轮次（闭环复审对照）', '')
+    for (const pass of review.history) {
+      out.push(`### 第 ${pass.pass} 轮`, '', `- 问题：${pass.question}`, `- 方案：${pass.plan}`)
+      if (pass.revisedPlanSummary !== undefined) out.push(`- 修订说明：${pass.revisedPlanSummary}`)
+      const endorsedInPass = pass.viewpoints.filter((viewpoint) => viewpoint.status === 'endorsed')
+      if (endorsedInPass.length > 0) {
+        out.push('- 该轮已认定缺陷：')
+        for (const viewpoint of endorsedInPass) out.push(`  - ${viewpoint.content}`)
+      }
+      out.push('')
+    }
+  }
+  return out.join('\n')
 }

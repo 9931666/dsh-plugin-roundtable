@@ -74,6 +74,25 @@ export type RoundTableKey =
   | 'settingsExpertMaxTokensHint'
   | 'settingsExpertMaxOpinions'
   | 'settingsExpertMaxOpinionsHint'
+  | 'feedbackTitle'
+  | 'feedbackEnabled'
+  | 'feedbackEnabledHint'
+  | 'feedbackPrivacyNote'
+  | 'feedbackListEmpty'
+  | 'feedbackListTitle'
+  | 'feedbackClear'
+  | 'feedbackCleared'
+  | 'feedbackLoadFailed'
+  | 'feedbackEntryMeta'
+  | 'feedbackAskTitle'
+  | 'feedbackAskGood'
+  | 'feedbackAskMeh'
+  | 'feedbackAskBad'
+  | 'feedbackAskNotePlaceholder'
+  | 'feedbackAskSubmit'
+  | 'feedbackAskSkip'
+  | 'feedbackAskSubmitted'
+  | 'feedbackAskFailed'
   | 'pendingBadge'
   | 'manageTitle'
   | 'managePendingNote'
@@ -117,6 +136,7 @@ export type RoundTableKey =
   | 'reviewPanelEmpty'
   | 'reviewStatusReady'
   | 'reviewStatusReviewing'
+  | 'reviewStatusDone'
   | 'reviewEndorsedCount'
   | 'reviewPending'
   | 'reviewRejected'
@@ -124,6 +144,18 @@ export type RoundTableKey =
   | 'reviewRejectedDone'
   | 'reviewRejectedToast'
   | 'reviewPendingToast'
+  | 'reviewRejectReasonPrompt'
+  | 'reviewRejectReasonPlaceholder'
+  | 'reviewRejectReasonRequired'
+  | 'reviewRejectConfirm'
+  | 'reviewRejectCancel'
+  | 'reviewEvidenceRepro'
+  | 'reviewEvidenceArgument'
+  | 'reviewPassBadge'
+  | 'reviewImpactTitle'
+  | 'reviewImpactThresholdHint'
+  | 'reviewImpactOk'
+  | 'reviewExportHint'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -244,6 +276,7 @@ export const zh: Record<RoundTableKey, string> = {
   reviewPanelEmpty: '暂无评审记录',
   reviewStatusReady: '已就绪',
   reviewStatusReviewing: '评审中',
+  reviewStatusDone: '已完成',
   reviewEndorsedCount: '已认定',
   reviewPending: '待审/未表态',
   reviewRejected: '已驳回',
@@ -251,6 +284,37 @@ export const zh: Record<RoundTableKey, string> = {
   reviewRejectedDone: '已驳回',
   reviewRejectedToast: '已驳回该观点（审阅后否定）',
   reviewPendingToast: '已取消标记',
+  reviewRejectReasonPrompt: '驳回需填写理由（必填，将计入评审记录）：',
+  reviewRejectReasonPlaceholder: '例如：该缺陷基于误解，方案已覆盖此场景…',
+  reviewRejectReasonRequired: '请填写驳回理由后再确认',
+  reviewRejectConfirm: '确认驳回',
+  reviewRejectCancel: '取消',
+  reviewEvidenceRepro: '可复现步骤',
+  reviewEvidenceArgument: '论证链',
+  reviewPassBadge: '第 {pass}/{max} 轮评审',
+  reviewImpactTitle: '影响概览',
+  reviewImpactThresholdHint: '已认定缺陷较多，建议据此重新协商方案后再修订。',
+  reviewImpactOk: '已认定缺陷已记录，可按此修订方案。',
+  reviewExportHint: '导出完整评审记录（Markdown）请在对话中让主持人调用导出。',
+  feedbackTitle: '用户反馈',
+  feedbackEnabled: '会议结束后询问轻量反馈',
+  feedbackEnabledHint: '开启：会议结束（评审关闭）后弹一次 1 键有用度询问；可随时在此关闭。',
+  feedbackPrivacyNote: '隐私边界：仅记录协作模式、专家 provider/模型、轮数/Token 用量、时间戳与可选一句说明；绝不记录对话内容。文件为工作区级 feedback.jsonl（建议加入 .gitignore），可一键清空。',
+  feedbackListEmpty: '（暂无已收集的反馈）',
+  feedbackListTitle: '已收集的反馈',
+  feedbackClear: '清空全部反馈',
+  feedbackCleared: '已清空反馈',
+  feedbackLoadFailed: '读取反馈失败',
+  feedbackEntryMeta: '{date} · {mode} · {providers} · {rounds} 轮 / {tokens} token · {rating}',
+  feedbackAskTitle: '这场会议对你有帮助吗？（1 键，匿名，可在设置里关闭）',
+  feedbackAskGood: '有帮助',
+  feedbackAskMeh: '一般',
+  feedbackAskBad: '没帮助',
+  feedbackAskNotePlaceholder: '最卡的点是什么？（可选）',
+  feedbackAskSubmit: '提交',
+  feedbackAskSkip: '跳过',
+  feedbackAskSubmitted: '谢谢反馈！可随时在设置 → 圆桌会议 → 用户反馈中关闭或清空。',
+  feedbackAskFailed: '反馈提交失败',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -365,6 +429,7 @@ export const en: Record<RoundTableKey, string> = {
   reviewPanelEmpty: 'No review records yet',
   reviewStatusReady: 'ready',
   reviewStatusReviewing: 'reviewing',
+  reviewStatusDone: 'done',
   reviewEndorsedCount: 'endorsed',
   reviewPending: 'unreviewed',
   reviewRejected: 'rejected',
@@ -372,4 +437,35 @@ export const en: Record<RoundTableKey, string> = {
   reviewRejectedDone: 'Rejected',
   reviewRejectedToast: 'Rejected after review; it will not feed the plan revision',
   reviewPendingToast: 'Marking cleared',
+  reviewRejectReasonPrompt: 'Rejecting requires a reason (required, kept in the review record):',
+  reviewRejectReasonPlaceholder: 'e.g. this flaw is based on a misunderstanding; the plan already covers it…',
+  reviewRejectReasonRequired: 'Please enter a reject reason before confirming',
+  reviewRejectConfirm: 'Confirm reject',
+  reviewRejectCancel: 'Cancel',
+  reviewEvidenceRepro: 'Reproduction steps',
+  reviewEvidenceArgument: 'Argument chain',
+  reviewPassBadge: 'Review pass {pass}/{max}',
+  reviewImpactTitle: 'Impact overview',
+  reviewImpactThresholdHint: 'Several flaws were endorsed — consider renegotiating the plan before revising.',
+  reviewImpactOk: 'Endorsed flaws are recorded; revise the plan accordingly.',
+  reviewExportHint: 'To export the full review record (Markdown), ask the captain to export it in the conversation.',
+  feedbackTitle: 'User feedback',
+  feedbackEnabled: 'Ask for lightweight feedback when a meeting ends',
+  feedbackEnabledHint: 'On: shows one 1-tap usefulness question after a meeting/review closes; turn it off here anytime.',
+  feedbackPrivacyNote: 'Privacy: only the collaboration mode, expert provider/model, round/token usage, timestamp and an optional one-line note are recorded — never conversation content. Stored in the workspace-level feedback.jsonl (consider .gitignore); can be wiped with one click.',
+  feedbackListEmpty: '(no feedback collected yet)',
+  feedbackListTitle: 'Collected feedback',
+  feedbackClear: 'Clear all feedback',
+  feedbackCleared: 'Feedback cleared',
+  feedbackLoadFailed: 'Failed to load feedback',
+  feedbackEntryMeta: '{date} · {mode} · {providers} · {rounds} rounds / {tokens} tokens · {rating}',
+  feedbackAskTitle: 'Was this meeting useful? (1 tap, anonymous, disable in settings)',
+  feedbackAskGood: 'Useful',
+  feedbackAskMeh: 'Meh',
+  feedbackAskBad: 'Not useful',
+  feedbackAskNotePlaceholder: 'What was the biggest pain point? (optional)',
+  feedbackAskSubmit: 'Submit',
+  feedbackAskSkip: 'Skip',
+  feedbackAskSubmitted: 'Thanks! Manage or clear feedback anytime under Settings → RoundTable → User feedback.',
+  feedbackAskFailed: 'Failed to submit feedback',
 }
