@@ -85,10 +85,14 @@ function fail<T>(message: string): RpcResult<T> {
 /** Connection service slice used to register this plugin's own RPC channel. */
 interface RpcConnection {
   readonly rpc: {
+    /**
+     * 0.1.5-rc.1 起为两参签名：`handle(channel, handler) => disposer`。
+     * 0.1.1 时代的第三参 `{ authority }` 已被移除；实测运行时忽略多余实参，
+     * 因此本 shim 只保留真实形状，避免后人照抄不存在的选项。
+     */
     readonly handle: (
       channel: string,
       handler: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult<unknown>>,
-      options?: { readonly authority: 'trusted-host' | 'loopback' },
     ) => unknown
   }
 }
@@ -509,11 +513,14 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
             return fail(`unknown endpoint: ${endpoint}`)
         }
       },
-      // Channel trust policy is REQUIRED — omitting it makes the host
-      // registration throw ("options.authority" read on undefined), the
-      // channel never mounts, and every browser RPC fails with
-      // "无法连接会议服务". Mirrors the ya-subagent plugin's usage.
-      { authority: 'trusted-host' as const },
+      // Two arguments only: the 0.1.1-era `{ authority: 'trusted-host' }` trust
+      // policy was removed from `connection.rpc.handle` — 0.1.5 declares
+      // `handle(channel, handler) => disposer`. Historical note: back then,
+      // omitting the option made host registration throw ("options.authority"
+      // read on undefined), the channel never mounted, and every browser RPC
+      // failed with "无法连接会议服务". That failure mode is gone; passing the
+      // extra object today is silently ignored, which is exactly why it went
+      // unnoticed until v0.2.21 aligned this shim with the real signature.
     )
   })
 }

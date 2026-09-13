@@ -34,8 +34,19 @@ interface ConnectionHandle {
   }
 }
 
+/**
+ * `ctx.slots` is the host's real SlotRegistry face, mirrored member-for-member
+ * in `ui-slots-anchor.d.ts` (it cannot be imported: the anchor must stay a
+ * global script so the `@deepseek-ai/dsh-client-ui-slots` ambient module keeps
+ * existing for this file's and `locales.ts`'s augmentations).
+ */
+type Slots = Context['slots']
+
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'roundtable: dictionaries')
+
+  // `ctx.slots` is the host's real SlotRegistry face (see ui-slots-anchor.d.ts).
+  const slots: Slots = ctx.slots
 
   const connection = (ctx as unknown as { connection?: ConnectionHandle }).connection
   const rpc: RpcCaller = <T,>(endpoint: string, payload: unknown): Promise<RpcResult<T>> => {
@@ -55,7 +66,7 @@ export function apply(ctx: Context): void {
     rpc,
     t: ctx.locale.bind(NS) as (key: string) => string,
   })
-  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+  slots.inject('conversation.view', () => slots.register({
     name: 'conversation.view',
     id: 'roundtable',
     order: 30,
@@ -69,7 +80,7 @@ export function apply(ctx: Context): void {
     rpc,
     t: ctx.locale.bind(NS) as (key: string) => string,
   })
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
+  slots.inject('settings.section', () => slots.register({
     name: 'settings.section',
     id: 'roundtable',
     order: 40,

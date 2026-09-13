@@ -1249,7 +1249,7 @@ function renderReviewMarkdown(review: ReviewRecord, meeting: Meeting): string {
   out.push('# 针锋相对评审记录', '')
   out.push('---')
   out.push('<!-- 以下为预填的 issue 元数据，可整段作为 GitHub issue 模板 -->')
-  out.push(`- **插件**：@huanlin/dsh-plugin-roundtable v0.2.2（DeepSeek Harness 0.1.2-rc.1+）`)
+  out.push(`- **插件**：@huanlin/dsh-plugin-roundtable v0.2.21（DeepSeek Harness 0.1.5-rc.1+）`)
   out.push(`- **协作模式**：${meeting.mode}`)
   const expertRoutes = meeting.nodes
     .filter((node) => node.status !== 'removed')

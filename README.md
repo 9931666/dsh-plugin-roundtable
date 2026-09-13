@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
-  <img src="https://img.shields.io/badge/version-v0.2.2-blue" alt="v0.2.2">
+  <img src="https://img.shields.io/badge/version-v0.2.21-blue" alt="v0.2.21">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
 
@@ -65,7 +65,7 @@
 ## 安装（一分钟）
 
 > [!NOTE]
-> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.1.2-rc.1+**；v0.2.1 起适配 0.1.2-rc.1 的 Cordis 4.0.2 / dsh 客户端架构，不再兼容 0.1.1-rc.2）。
+> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.1.5-rc.1+**；v0.2.21 起按 0.1.5-rc.1 宿主复核（对应 `@deepseek-ai/*` 0.1.5-rc.2 包），v0.2.1 起即适配 Cordis 4.0.2 / dsh 客户端架构，不再兼容 0.1.1-rc.2）。
 
 **最快（npm，需要已 `npm login`）**：
 
@@ -85,7 +85,7 @@ dsh plugin --profile web add .
 
 装完**重启 DSH**（关窗口 → 重新启动）→ 刷新 Web UI → 设置 → 圆桌会议能读出默认值即可。
 
-**从 0.1.1-rc.2 / 旧版升级**：宿主必须先升到 0.1.2-rc.1+；直接装 v0.2.2 覆盖旧插件，重启 DSH。历史会议记录（`.roundtable/`）跨大版本兼容性不保证，重要会议先导出。
+**从 0.1.1-rc.2 / 旧版升级**：宿主必须先升到 0.1.5-rc.1+；直接装 v0.2.21 覆盖旧插件，重启 DSH。历史会议记录（`.roundtable/`）跨大版本兼容性不保证，重要会议先导出。
 
 ### npm 安装方式（等价，供脚本化）
 
