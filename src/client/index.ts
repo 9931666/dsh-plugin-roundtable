@@ -12,8 +12,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { RpcResult } from '@deepseek-ai/dsh-client-connection/client'
-// Type-only: pulls the conversation SlotMap merge ('conversation.view').
+import type { RpcResult } from '@deepseek-ai/dsh-client-connection/client'// Type-only: pulls the conversation SlotMap merge ('conversation.view').
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the settings SlotMap merge ('settings.section').
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -22,9 +21,13 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { RoundTableView, type RoundTableViewInjected } from './RoundTableView.tsx'
 import { RoundTableSettings, type RoundTableSettingsInjected } from './RoundTableSettings.tsx'
 import { en, NS, zh } from './locales.ts'
-import type { RpcCaller } from './wire.ts'
+import { callRpc, type RpcCaller, type RpcEnvelope } from './wire.ts'
 
-/** Required services: view/settings slots, locale, connection. */
+/**
+ * Required services: view/settings slots and locale. `connection` is kept in
+ * the inject list as an OPTIONAL fallback (RPC prefers the plugin's own web
+ * route), so a composition without that service still loads.
+ */
 export const inject = ['slots', 'locale', 'connection']
 
 /** Client connection shape: generic RPC caller over the host `/api` channel. */
@@ -49,16 +52,17 @@ export function apply(ctx: Context): void {
   const slots: Slots = ctx.slots
 
   const connection = (ctx as unknown as { connection?: ConnectionHandle }).connection
-  const rpc: RpcCaller = <T,>(endpoint: string, payload: unknown): Promise<RpcResult<T>> => {
-    if (connection === undefined) {
-      return Promise.reject(new Error('roundtable: connection service unavailable'))
+  // Preferred transport: the plugin's own web route (same registration as the
+  // snapshot route). The host connection channel stays as a fallback for older
+  // or non-web profiles, so an unreachable route degrades instead of breaking.
+  const rpc: RpcCaller = async <T,>(endpoint: string, payload: unknown): Promise<RpcEnvelope<T>> => {
+    const direct = await callRpc<T>(endpoint, payload)
+    if (direct.ok || connection === undefined) return direct
+    try {
+      return await connection.rpc.call('/roundtable', endpoint, payload) as unknown as RpcEnvelope<T>
+    } catch {
+      return direct
     }
-    // This plugin owns the `/roundtable` channel (its own prefix-routed RPC
-    // channel), NOT the shared `/api` channel — that one is a single
-    // interceptor owned by dsh-api-gateway, and claiming it here would throw
-    // and drop every roundtable call (the "cannot connect" drag-to-connect
-    // bug). Mirrors the ya-subagent plugin's own `/ya-subagent` channel.
-    return connection.rpc.call('/roundtable', endpoint, payload) as unknown as Promise<RpcResult<T>>
   }
 
   // ---- Topology tab (conversation.view) --------------------------------

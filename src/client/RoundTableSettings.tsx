@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import type { RpcCaller, RoundTablePrefs, WireFeedbackEntry } from './wire.ts'
+import type { RpcCaller, RoundTablePrefs, WireFeedbackEntry, WireProviderOption, WireRolePreset } from './wire.ts'
 import styles from './RoundTableSettings.module.css'
 
 export interface RoundTableSettingsInjected {
@@ -23,6 +23,21 @@ const RATING_LABEL: Record<WireFeedbackEntry['rating'], string> = {
   bad: '👎',
 }
 
+/** R3：右栏面板的稳定 id 与文案键（与 host `ROUNDTABLE_PANELS` 一一对应）。 */
+const PANEL_KEYS: ReadonlyArray<{ id: string; labelKey: string }> = [
+  { id: 'agents', labelKey: 'agents' },
+  { id: 'tasks', labelKey: 'tasks' },
+  { id: 'kb', labelKey: 'kb' },
+  { id: 'skills', labelKey: 'skillsTitle' },
+  { id: 'activity', labelKey: 'activity' },
+  { id: 'review', labelKey: 'reviewPanelTitle' },
+  { id: 'files', labelKey: 'files' },
+]
+
+/** B3：预设条数上限，与 host `rpc.ts` 的 `ROLE_PRESET_MAX` 保持一致
+ *  （客户端提前拦截，服务端仍然会截断，两层都有）。 */
+const ROLE_PRESET_LIMIT = 50
+
 export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element {
   const { rpc, t } = props
   const [prefs, setPrefs] = useState<RoundTablePrefs | null>(null)
@@ -33,6 +48,26 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
   const [feedback, setFeedback] = useState<WireFeedbackEntry[]>([])
   const [feedbackLoadFailed, setFeedbackLoadFailed] = useState(false)
   const [feedbackCleared, setFeedbackCleared] = useState(false)
+  // B3 角色预设：列表在 prefs 里，表单与"编辑中"是纯本地状态。
+  const [providers, setProviders] = useState<WireProviderOption[]>([])
+  const [presetFormOpen, setPresetFormOpen] = useState(false)
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
+  const [presetDraft, setPresetDraft] = useState<{ name: string; role: string; provider: string; model: string }>({
+    name: '',
+    role: '',
+    provider: '',
+    model: '',
+  })
+  const [presetNotice, setPresetNotice] = useState<'saved' | 'failed' | 'invalid' | 'limit' | null>(null)
+
+  // 模型下拉复用与专家管理同一份主机模型目录。
+  useEffect(() => {
+    void rpc<{ providers: WireProviderOption[] }>('roundtable/models.list', {})
+      .then((result) => {
+        if (result.ok) setProviders(Array.isArray(result.value?.providers) ? result.value.providers : [])
+      })
+      .catch(() => undefined)
+  }, [rpc])
 
   const loadFeedback = useCallback((): void => {
     void rpc<{ entries: WireFeedbackEntry[] }>('roundtable/feedback.list', {})
@@ -70,6 +105,17 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
     setSaved(false)
   }
 
+  /** R3：点亮/熄灭一个右栏面板（写入 hiddenPanels）。 */
+  const togglePanel = (id: string): void => {
+    setPrefs((previous) => {
+      if (previous === null) return null
+      const hidden = Array.isArray(previous.hiddenPanels) ? previous.hiddenPanels : []
+      const nextHidden = hidden.includes(id) ? hidden.filter((entry) => entry !== id) : [...hidden, id]
+      return { ...previous, hiddenPanels: nextHidden }
+    })
+    setSaved(false)
+  }
+
   const save = (): void => {
     if (prefs === null || saving) return
     setSaving(true)
@@ -82,6 +128,8 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       expertMaxTokens: prefs.expertMaxTokens,
       expertMaxOpinions: prefs.expertMaxOpinions,
       feedbackEnabled: prefs.feedbackEnabled,
+      skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
+      hiddenPanels: Array.isArray(prefs.hiddenPanels) ? prefs.hiddenPanels : [],
     })
       .then((result) => {
         setSaving(false)
@@ -111,6 +159,95 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       .catch(() => setFeedbackLoadFailed(true))
   }
 
+  /* ---------------- B3：角色预设（改动立即落库，不必等底部保存） ---------------- */
+
+  /** 新建预设的稳定 id；host 侧只在 id 缺失或重复时才重新分配。 */
+  const newPresetId = (): string =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `preset-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+
+  /**
+   * 写入整份偏好（含新的 rolePresets）。
+   *
+   * 刻意提交**完整对象**而不是只提交 `{ rolePresets }`：服务端
+   * `scope.update` 究竟是合并还是整体替换，客户端无法确定；提交完整对象
+   * 在两种语义下都正确，也与底部「保存」按钮的做法一致。
+   */
+  const persistPresets = (next: WireRolePreset[]): void => {
+    if (prefs === null) return
+    const full: RoundTablePrefs = { ...prefs, rolePresets: next }
+    setPrefs(full)
+    void rpc<RoundTablePrefs>('roundtable/prefs.set', { ...full })
+      .then((result) => {
+        if (result.ok) {
+          setPrefs(result.value)
+          setPresetNotice('saved')
+        } else {
+          setPresetNotice('failed')
+        }
+      })
+      .catch(() => setPresetNotice('failed'))
+  }
+
+  const openPresetForm = (preset?: WireRolePreset): void => {
+    setPresetNotice(null)
+    if (preset === undefined) {
+      setEditingPresetId(null)
+      setPresetDraft({ name: '', role: '', provider: '', model: '' })
+    } else {
+      setEditingPresetId(preset.id)
+      setPresetDraft({
+        name: preset.name,
+        role: preset.role,
+        provider: preset.provider ?? '',
+        model: preset.model ?? '',
+      })
+    }
+    setPresetFormOpen(true)
+  }
+
+  const closePresetForm = (): void => {
+    setPresetFormOpen(false)
+    setEditingPresetId(null)
+    setPresetDraft({ name: '', role: '', provider: '', model: '' })
+  }
+
+  const submitPreset = (): void => {
+    if (prefs === null) return
+    const name = presetDraft.name.trim()
+    const role = presetDraft.role.trim()
+    if (name === '' || role === '') {
+      setPresetNotice('invalid')
+      return
+    }
+    const current = Array.isArray(prefs.rolePresets) ? prefs.rolePresets : []
+    if (editingPresetId === null && current.length >= ROLE_PRESET_LIMIT) {
+      setPresetNotice('limit')
+      return
+    }
+    // provider/model 必须成对：只有两者都选好才算"指定路由"，否则继承主持人。
+    const routed = presetDraft.provider !== '' && presetDraft.model !== ''
+    const entry: WireRolePreset = {
+      id: editingPresetId ?? newPresetId(),
+      name,
+      role,
+      ...(routed ? { provider: presetDraft.provider, model: presetDraft.model } : {}),
+    }
+    const next = editingPresetId === null
+      ? [...current, entry]
+      : current.map((preset) => (preset.id === editingPresetId ? entry : preset))
+    persistPresets(next)
+    closePresetForm()
+  }
+
+  const deletePreset = (id: string): void => {
+    if (prefs === null) return
+    const current = Array.isArray(prefs.rolePresets) ? prefs.rolePresets : []
+    persistPresets(current.filter((preset) => preset.id !== id))
+    if (editingPresetId === id) closePresetForm()
+  }
+
   const formatTs = (ts: number): string => {
     try {
       const date = new Date(ts)
@@ -124,6 +261,8 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
   if (prefs === null) {
     return <div className={styles.note}>{loadFailed ? t('settingsLoadFailed') : '…'}</div>
   }
+
+  const presets = Array.isArray(prefs.rolePresets) ? prefs.rolePresets : []
 
   return (
     <div className={styles.root}>
@@ -183,6 +322,147 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
           <span className={styles.switchLabel}>{prefs.showAllMeetings ? t('settingsShowAllOn') : t('settingsShowAllOff')}</span>
         </label>
         <div className={styles.hint}>{t('settingsShowAllHint')}</div>
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.sectionTitle}>{t('settingsPanelsTitle')}</div>
+      <div className={styles.field}>
+        <div className={styles.panelToggles}>
+          {PANEL_KEYS.map((panel) => {
+            const visible = !(Array.isArray(prefs.hiddenPanels) ? prefs.hiddenPanels : []).includes(panel.id)
+            return (
+              <button
+                key={panel.id}
+                type="button"
+                className={visible ? styles.panelToggleOn : styles.panelToggleOff}
+                aria-pressed={visible}
+                title={`${t(panel.labelKey)} · ${visible ? t('panelOn') : t('panelOff')}`}
+                onClick={() => togglePanel(panel.id)}
+              >
+                <span className={styles.panelDot} aria-hidden="true" />
+                <span className={styles.panelToggleLabel}>{t(panel.labelKey)}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className={styles.hint}>{t('settingsPanelsHint')}</div>
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.sectionTitle}>{t('settingsSkillTitle')}</div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('settingsSkillDelivery')}</label>
+        <select
+          className={styles.select}
+          value={prefs.skillDelivery === 'direct' ? 'direct' : 'relay'}
+          onChange={(event) => patch({ skillDelivery: event.target.value === 'direct' ? 'direct' : 'relay' })}
+        >
+          <option value="relay">{t('settingsSkillDeliveryRelay')}</option>
+          <option value="direct">{t('settingsSkillDeliveryDirect')}</option>
+        </select>
+        <div className={styles.hint}>
+          {prefs.skillDelivery === 'direct' ? t('settingsSkillDeliveryDirectHint') : t('settingsSkillDeliveryRelayHint')}
+        </div>
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.sectionTitle}>{t('settingsPresetsTitle')}</div>
+      <div className={styles.field}>
+        <div className={styles.hint}>{t('settingsPresetsHint')}</div>
+        {presets.length === 0 ? (
+          <div className={styles.note}>{t('settingsPresetsEmpty')}</div>
+        ) : (
+          <div className={styles.presetList}>
+            {presets.map((preset) => (
+              <div key={preset.id} className={styles.presetItem}>
+                <div className={styles.presetInfo}>
+                  <div className={styles.presetName}>{preset.name}</div>
+                  <div className={styles.presetMeta}>{preset.role}</div>
+                  <div className={styles.presetRoute}>
+                    {preset.provider !== undefined && preset.provider !== '' && preset.model !== undefined && preset.model !== ''
+                      ? `${preset.provider}/${preset.model}`
+                      : t('manageModelInherit')}
+                  </div>
+                </div>
+                <div className={styles.presetActions}>
+                  <button type="button" className={styles.presetBtn} onClick={() => openPresetForm(preset)}>
+                    {t('settingsPresetEdit')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.presetBtn} ${styles.presetDeleteBtn}`}
+                    onClick={() => deletePreset(preset.id)}
+                  >
+                    {t('settingsPresetDelete')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {presetFormOpen ? (
+          <div className={styles.presetForm}>
+            <div className={styles.presetFormRow}>
+              <label className={styles.label}>{t('settingsPresetName')}</label>
+              <input
+                className={styles.input}
+                value={presetDraft.name}
+                placeholder={t('settingsPresetNamePlaceholder')}
+                onChange={(event) => setPresetDraft((previous) => ({ ...previous, name: event.target.value }))}
+              />
+            </div>
+            <div className={styles.presetFormRow}>
+              <label className={styles.label}>{t('settingsPresetRole')}</label>
+              <input
+                className={styles.input}
+                value={presetDraft.role}
+                placeholder={t('settingsPresetRolePlaceholder')}
+                onChange={(event) => setPresetDraft((previous) => ({ ...previous, role: event.target.value }))}
+              />
+            </div>
+            <div className={styles.presetFormRow}>
+              <label className={styles.label}>{t('settingsPresetModel')}</label>
+              <div className={styles.presetModelRow}>
+                <select
+                  className={styles.presetSelect}
+                  value={presetDraft.provider}
+                  onChange={(event) => setPresetDraft((previous) => ({ ...previous, provider: event.target.value, model: '' }))}
+                >
+                  <option value="">{t('manageModelInherit')}</option>
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>{provider.name || provider.id}</option>
+                  ))}
+                </select>
+                <select
+                  className={styles.presetSelect}
+                  value={presetDraft.model}
+                  disabled={presetDraft.provider === ''}
+                  onChange={(event) => setPresetDraft((previous) => ({ ...previous, model: event.target.value }))}
+                >
+                  <option value="">{t('manageModelInherit')}</option>
+                  {(providers.find((provider) => provider.id === presetDraft.provider)?.models ?? []).map((model) => (
+                    <option key={model.id} value={model.id}>{model.name || model.id}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className={styles.presetFormActions}>
+              <button type="button" className={styles.presetAddBtn} onClick={submitPreset}>
+                {t('settingsPresetSave')}
+              </button>
+              <button type="button" className={styles.presetCancelBtn} onClick={closePresetForm}>
+                {t('settingsPresetCancel')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className={styles.presetAddBtn} onClick={() => openPresetForm()}>
+            + {t('settingsPresetAdd')}
+          </button>
+        )}
+        {presetNotice === 'saved' ? <span className={styles.saved}>{t('settingsPresetUpdated')}</span> : null}
+        {presetNotice === 'failed' ? <span className={styles.failed}>{t('settingsSaveFailed')}</span> : null}
+        {presetNotice === 'invalid' ? <span className={styles.failed}>{t('settingsPresetInvalid')}</span> : null}
+        {presetNotice === 'limit' ? (
+          <span className={styles.failed}>{t('settingsPresetLimit').replace('{max}', String(ROLE_PRESET_LIMIT))}</span>
+        ) : null}
       </div>
       <div className={styles.sectionDivider} />
       <div className={styles.sectionTitle}>{t('settingsLimitsTitle')}</div>

@@ -26,7 +26,7 @@ import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join } from 'node:path'
-import type { EdgeDirection, FeedbackEntry, UserAction } from './types.ts'
+import type { EdgeDirection, FeedbackEntry, RolePreset, UserAction } from './types.ts'
 import {
   appendFeedback,
   appendUserAction,
@@ -62,6 +62,79 @@ export interface RoundTablePreferences {
   readonly expertMaxOpinions: number
   /** E1/E4 反馈：会议结束后是否询问轻量反馈；false = 永久关闭（设置页可改）。 */
   readonly feedbackEnabled: boolean
+  /** R2.2/D5：skill 传递方式（relay=主持人中转；direct=专家自行调用）。 */
+  readonly skillDelivery: 'relay' | 'direct'
+  /** 右栏面板可见性（R3）：被列出的面板在拓扑页隐藏；空 = 全部显示。 */
+  readonly hiddenPanels: string[]
+  /** B3：用户自建角色预设（全局偏好；不预置任何内置角色）。 */
+  readonly rolePresets: RolePreset[]
+}
+
+/** 右栏可隐藏的面板 id（客户端与服务端共用的稳定标识）。 */
+export const ROUNDTABLE_PANELS: readonly string[] = [
+  'agents',
+  'tasks',
+  'kb',
+  'skills',
+  'activity',
+  'review',
+  'files',
+]
+
+/** 把任意输入收敛成合法的隐藏面板清单（未知 id 丢弃，去重）。 */
+export function sanitizeHiddenPanels(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    const id = typeof item === 'string' ? item.trim() : ''
+    if (id === '' || !ROUNDTABLE_PANELS.includes(id) || out.includes(id)) continue
+    out.push(id)
+  }
+  return out
+}
+
+/** 预设条目的硬上限（客户端与服务端共用；服务端截断，客户端提前拦截）。 */
+export const ROLE_PRESET_MAX = 50
+const ROLE_PRESET_ID_MAX = 64
+const ROLE_PRESET_NAME_MAX = 40
+const ROLE_PRESET_ROLE_MAX = 400
+
+/**
+ * 把任意输入收敛成合法的角色预设清单（B3）。
+ *
+ * schemastery 的 `z.object` 在 resolve 阶段**不校验缺失的 required 字段**
+ * （`s({ rolePresets: [{ id: 'a' }] })` 直接通过），所以条目级校验不能依赖
+ * schema，必须在这里手写 —— 与 {@link sanitizeHiddenPanels} 同一套路：
+ *   - `name` 与 `role` 非空是硬要求，二者缺一即丢弃该条；
+ *   - `id` 为空或与前面的条目重复时**重新分配**（保数据，不静默丢条目）；
+ *   - `provider`/`model` 必须成对出现，否则整体视为"继承主持人"；
+ *   - 单字段超长截断，总条数超 {@link ROLE_PRESET_MAX} 截断。
+ */
+export function sanitizeRolePresets(value: unknown): RolePreset[] {
+  if (!Array.isArray(value)) return []
+  const out: RolePreset[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (out.length >= ROLE_PRESET_MAX) break
+    if (item === null || typeof item !== 'object') continue
+    const raw = item as { id?: unknown; name?: unknown; role?: unknown; provider?: unknown; model?: unknown }
+    const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, ROLE_PRESET_NAME_MAX) : ''
+    const role = typeof raw.role === 'string' ? raw.role.trim().slice(0, ROLE_PRESET_ROLE_MAX) : ''
+    if (name === '' || role === '') continue
+    const candidate = typeof raw.id === 'string' ? raw.id.trim().slice(0, ROLE_PRESET_ID_MAX) : ''
+    const id = candidate === '' || seen.has(candidate) ? randomUUID() : candidate
+    seen.add(id)
+    const provider = typeof raw.provider === 'string' ? raw.provider.trim() : ''
+    const model = typeof raw.model === 'string' ? raw.model.trim() : ''
+    const routed = provider !== '' && model !== ''
+    out.push({
+      id,
+      name,
+      role,
+      ...(routed ? { provider, model } : {}),
+    })
+  }
+  return out
 }
 
 /** Holder shared between the settings fiber and the RPC fiber. */
@@ -72,7 +145,17 @@ export interface RoundTableRuntime {
   fallbackPrefs: RoundTablePreferences
 }
 
-const ENDPOINT_PREFIX = 'roundtable/'
+/**
+ * Browser-facing POST route for this plugin's RPC.
+ *
+ * It mirrors the snapshot route's transport (the plugin's own `webServer`
+ * registration) instead of relying on the host's generic connection channel,
+ * which is what the client actually reaches.
+ */
+export const RPC_ROUTE = '/plugins/dsh-plugin-roundtable/rpc'
+
+/** One endpoint dispatch: `(endpoint, payload) => envelope`, never throws. */
+export type RpcDispatch = (endpoint: string, payload: unknown) => Promise<RpcResult<unknown>>
 
 function ok<T>(value: T): RpcResult<T> {
   return { ok: true, value }
@@ -93,8 +176,7 @@ interface RpcConnection {
     readonly handle: (
       channel: string,
       handler: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult<unknown>>,
-    ) => unknown
-  }
+    ) => unknown  }
 }
 
 /** Run one meeting mutation under the meeting lock, resolving its state root first. */
@@ -157,14 +239,23 @@ async function applyViewpointStatus(
   })
 }
 
-/** Register the RoundTable RPC handler on the plugin's own channel. */
-export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
-  ctx.inject(['connection'], (connectionCtx) => {
-    const connection = connectionCtx.connection as unknown as RpcConnection
-    connection.rpc.handle(
-      '/roundtable',
-      async (endpoint, payload) => {
-        switch (endpoint) {
+/**
+ * Register the RoundTable RPC handler.
+ *
+ * Two transports share ONE dispatch body, so the browser can reach the plugin
+ * even when the host's generic `connection` channel is not mounted (or its
+ * `/roundtable` prefix got dropped by a live plugin reload):
+ *   1. the host `connection` RPC channel `/roundtable` (kept for compatibility);
+ *   2. the plugin's own `webServer` POST route `<RPC_ROUTE>` — the same
+ *      transport as the `/plugins/dsh-plugin-roundtable/state` snapshot route,
+ *      which is what the browser actually uses.
+ *
+ * @returns the dispatch function, so the caller can mount it on a web route.
+ */
+export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispatch {
+  const dispatch: RpcDispatch = async (endpoint, payload) => {
+    try {
+      switch (endpoint) {
           case 'roundtable/prefs.get': {
             const prefs = runtime.scope?.get() ?? runtime.fallbackPrefs
             return ok<RoundTablePreferences>({
@@ -175,6 +266,9 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               expertMaxTokens: prefs.expertMaxTokens ?? 0,
               expertMaxOpinions: prefs.expertMaxOpinions ?? 0,
               feedbackEnabled: prefs.feedbackEnabled ?? true,
+              skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
+              hiddenPanels: sanitizeHiddenPanels(prefs.hiddenPanels),
+              rolePresets: sanitizeRolePresets(prefs.rolePresets),
             })
           }
           case 'roundtable/prefs.set': {
@@ -197,6 +291,9 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
                 expertMaxTokens: clampLimit(patch.expertMaxTokens, base.expertMaxTokens ?? 0),
                 expertMaxOpinions: clampLimit(patch.expertMaxOpinions, base.expertMaxOpinions ?? 0),
                 feedbackEnabled: typeof patch.feedbackEnabled === 'boolean' ? patch.feedbackEnabled : (base.feedbackEnabled ?? true),
+                skillDelivery: patch.skillDelivery === 'direct' || patch.skillDelivery === 'relay' ? patch.skillDelivery : base.skillDelivery,
+                hiddenPanels: patch.hiddenPanels === undefined ? base.hiddenPanels : sanitizeHiddenPanels(patch.hiddenPanels),
+                rolePresets: patch.rolePresets === undefined ? (base.rolePresets ?? []) : sanitizeRolePresets(patch.rolePresets),
               }
               runtime.fallbackPrefs = next
               return ok<RoundTablePreferences>({
@@ -207,9 +304,16 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
                 expertMaxTokens: next.expertMaxTokens,
                 expertMaxOpinions: next.expertMaxOpinions,
                 feedbackEnabled: next.feedbackEnabled,
+                skillDelivery: next.skillDelivery,
+                hiddenPanels: next.hiddenPanels,
+                rolePresets: next.rolePresets ?? [],
               })
             }
-            await runtime.scope.update(patch as object)
+            // 写入前先净化：坏数据不落库（schemastery 不会替我们拦）。
+            const sanitized: Record<string, unknown> = { ...patch }
+            if (patch.hiddenPanels !== undefined) sanitized.hiddenPanels = sanitizeHiddenPanels(patch.hiddenPanels)
+            if (patch.rolePresets !== undefined) sanitized.rolePresets = sanitizeRolePresets(patch.rolePresets)
+            await runtime.scope.update(sanitized)
             const next = runtime.scope.get()
             return ok<RoundTablePreferences>({
               defaultMode: next.defaultMode,
@@ -219,6 +323,9 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
               expertMaxTokens: next.expertMaxTokens ?? 0,
               expertMaxOpinions: next.expertMaxOpinions ?? 0,
               feedbackEnabled: next.feedbackEnabled ?? true,
+              skillDelivery: next.skillDelivery === 'direct' ? 'direct' : 'relay',
+              hiddenPanels: sanitizeHiddenPanels(next.hiddenPanels),
+              rolePresets: sanitizeRolePresets(next.rolePresets),
             })
           }
           case 'roundtable/edge.set': {
@@ -512,17 +619,35 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): void {
           default:
             return fail(`unknown endpoint: ${endpoint}`)
         }
-      },
-      // Two arguments only: the 0.1.1-era `{ authority: 'trusted-host' }` trust
-      // policy was removed from `connection.rpc.handle` — 0.1.5 declares
-      // `handle(channel, handler) => disposer`. Historical note: back then,
-      // omitting the option made host registration throw ("options.authority"
-      // read on undefined), the channel never mounted, and every browser RPC
-      // failed with "无法连接会议服务". That failure mode is gone; passing the
-      // extra object today is silently ignored, which is exactly why it went
-      // unnoticed until v0.2.21 aligned this shim with the real signature.
-    )
+    } catch (error: unknown) {
+      // HTTP 回退路由必须"永不抛"，否则 webServer 会以 400 收场、客户端只能
+      // 看到 fetch 失败而不是真正的错误信息。
+      return fail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  // Transport 1: the host's generic connection channel (compatibility path).
+  // Two arguments only: the 0.1.1-era `{ authority: 'trusted-host' }` trust
+  // policy was removed from `connection.rpc.handle` — 0.1.5 declares
+  // `handle(channel, handler) => disposer`. Historical note: back then,
+  // omitting the option made host registration throw ("options.authority" read
+  // on undefined), the channel never mounted, and every browser RPC failed with
+  // "无法连接会议服务". That failure mode is gone; passing the extra object
+  // today is silently ignored, which is exactly why it went unnoticed until
+  // v0.2.21 aligned this shim with the real signature.
+  ctx.inject(['connection'], (connectionCtx) => {
+    const connection = connectionCtx.connection as unknown as RpcConnection
+    const disposer: unknown = connection.rpc.handle('/roundtable', dispatch)
+    // `connection.rpc.handle` returns the route disposer; hand it to the plugin
+    // fiber so the channel unmounts with the plugin.
+    if (typeof disposer === 'function') {
+      const release = disposer as () => unknown
+      connectionCtx.effect(() => () => {
+        void release()
+      }, 'roundtable: rpc channel')
+    }
   })
+  return dispatch
 }
 
 /** One knowledge-base directory entry (阅览版: name/kind/format/size only). */

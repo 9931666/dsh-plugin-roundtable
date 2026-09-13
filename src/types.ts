@@ -13,7 +13,16 @@
  *  peer-to-peer, or a 针锋相对 (red-team) review of a settled plan. */
 export type MeetingMode = 'orchestrated' | 'egalitarian' | 'redteam'
 
-/** Meeting lifecycle. `muted` = budget exceeded (闭麦); user may top up or close. */
+/** skill 传递方式（D5）：主持人中转 / 专家直接调用。 */
+export type SkillDelivery = 'relay' | 'direct'
+
+/** Meeting lifecycle. `muted` = budget exceeded (闭麦); user may top up or close.
+ *
+ *  `archived` is a RESERVED state: no code path in this plugin ever writes it
+ *  (meeting archiving / read-only mode is deliberately out of scope for this
+ *  release). The guards that test for it are kept on purpose — they are
+ *  defensive branches, not dead weight, so implementing archiving later cannot
+ *  silently miss a call site. */
 export type MeetingStatus = 'active' | 'muted' | 'ended' | 'archived'
 
 /** One expert node's lifecycle status. */
@@ -46,7 +55,11 @@ export interface MeetingNode {
   provider?: string
   /** Resolved model captured when this node was created. */
   model?: string
-  /** Resolved reasoning effort captured when this node was created. */
+  /** Resolved reasoning effort captured when this node was created.
+   *  An adapter-owned opaque id (e.g. `high` / `medium` / `low` — the exact
+   *  vocabulary belongs to the model capability, not to this plugin). Read by
+   *  `spawnNode` into `agentOptions.reasoningEffort` and surfaced by
+   *  `roundtable_status`; absent = inherit the captain's route-owned effort. */
   reasoningEffort?: string
   status: NodeStatus
   joinedAt: number
@@ -123,6 +136,51 @@ export interface UserAction {
   text: string
 }
 
+/** 用户自建的角色预设（B3）。
+ *
+ *  全局偏好（`settings.yaml` 的 `roundtable` 命名空间），不属于任何一场会议：
+ *  新建/编辑/删除预设都不会影响已创建的会议。它只是"专家管理"表单的填充
+ *  来源 —— 选中后把 role/provider/model 三个字段写进同一条 `add-node`
+ *  user-action，链路与手填完全一致（不需要新链路）。 */
+export interface RolePreset {
+  /** 稳定 id（新建时生成；编辑与删除都按 id 定位）。 */
+  id: string
+  /** 预设名称，如"安全审查"。 */
+  name: string
+  /** 角色说明，最终写进专家节点的 role。 */
+  role: string
+  /** 可选 LLM provider 路由；必须与 model 同时给出才生效。空 = 继承主持人。 */
+  provider?: string
+  /** 可选模型名；空 = 继承主持人。 */
+  model?: string
+}
+
+/** 知识库摘要缓存（C2）的一条条目。
+ *
+ *  失效键 = `path + size + mtimeMs`：任一变化即视为失效。宿主
+ *  `listKbDirectory()` 本来就在 stat 每个条目，所以比对不产生额外 IO。
+ *  本插件**不自己调 LLM 生成摘要** —— digest 由主持人读过文件后写下，
+ *  缓存只负责"命中就不必再读第二遍"（你读 + 专家读 = 双倍 token）。 */
+export interface KbDigestEntry {
+  /** 知识库中被读取条目的绝对路径。 */
+  path: string
+  /** 失效键：写摘要时的文件大小（字节）。 */
+  size: number
+  /** 失效键：写摘要时的修改时间（ms）。 */
+  mtimeMs: number
+  /** 主持人写下的要点摘要（不是全文）。 */
+  digest: string
+  /** 摘要写入时间（ms），超限时按最旧淘汰。 */
+  ts: number
+}
+
+/** `<meetingDir>/kb-digest.json` 的形状（独立文件，避开 meeting.json 竞态）。 */
+export interface KbDigestFile {
+  meetingId: string
+  entries: KbDigestEntry[]
+  updatedAt: number
+}
+
 /** The full durable meeting record (transcript lives in transcript.jsonl). */
 export interface Meeting {
   /** Sanitized stable id; the meeting directory name. */
@@ -143,6 +201,10 @@ export interface Meeting {
   round: number
   /** 知识库目录（阅览版）：主持人按需读取其中文件转交专家。空 = 未设置。 */
   kbPath?: string
+  /** 本次会议选中的 skill 名称清单（来自 `ctx.skills.list()`）；空/缺省 = 未选。 */
+  skills?: string[]
+  /** skill 传递方式（创建时固化）：relay=主持人中转；direct=专家自行调用。 */
+  skillDelivery?: SkillDelivery
   status: MeetingStatus
   createdAt: number
   updatedAt: number

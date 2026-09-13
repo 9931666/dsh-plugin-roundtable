@@ -46,6 +46,10 @@ export interface MeetingSnapshot {
   captainSessionId: string
   /** 知识库目录（阅览版）；空 = 未设置。 */
   kbPath: string
+  /** R2：本次会议选中的 skill 名称清单；空 = 未选。 */
+  skills: string[]
+  /** R2.2/D5：skill 传递方式（relay / direct）。 */
+  skillDelivery: string
   budget: {
     maxRounds: number
     maxTokens: number
@@ -224,6 +228,8 @@ export async function collectMeetingSnapshots(
         workspace: root.workspace,
         captainSessionId: meeting.captainSessionId,
         kbPath: meeting.kbPath ?? '',
+        skills: meeting.skills ?? [],
+        skillDelivery: meeting.skillDelivery ?? 'relay',
         budget: {
           maxRounds: meeting.budget.maxRounds,
           maxTokens: meeting.budget.maxTokens,

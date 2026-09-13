@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
-import type { RpcCaller, WireEdge, WireKbListing, WireMeeting, WireNode, WireProviderOption } from './wire.ts'
+import type { RpcCaller, WireEdge, WireKbListing, WireMeeting, WireNode, WireProviderOption, WireRolePreset } from './wire.ts'
 import { fetchMeetings } from './wire.ts'
 import { BRAND_LOGOS } from './brand-logos.generated.ts'
 import styles from './RoundTableView.module.css'
@@ -97,9 +97,15 @@ function layoutPositions(size: { w: number; h: number }, meeting: WireMeeting): 
   positions.set('captain', { x: Math.max(64, w * 0.10), y: h * 0.5 })
   positions.set('aggregator', { x: Math.max(150, w * 0.33), y: h * 0.5 })
   const nodes = meeting.nodes
+  // 节点环占据画布右侧约 78% 的宽度，并**按可用高度铺开**：内边距只留一个
+  // 节点半径 + 一圈呼吸空间，避免高画布时上下各空掉一半（"拓扑图下面一大
+  // 片空白"）。宽度仍是硬约束，所以半径取两者的较小值。
   const centerX = w * 0.78
   const centerY = h * 0.5
-  const radius = Math.min(w * 0.20, h * 0.36)
+  const radius = Math.max(
+    NODE_RADIUS + 12,
+    Math.min(w * 0.20, h * 0.5 - NODE_RADIUS - 18),
+  )
   nodes.forEach((node, index) => {
     const angle = -Math.PI / 2 + (index / Math.max(1, nodes.length)) * Math.PI * 2
     positions.set(node.key, {
@@ -255,6 +261,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [providers, setProviders] = useState<WireProviderOption[]>([])
   const [modelsLoaded, setModelsLoaded] = useState(false)
   const [form, setForm] = useState<{ name: string; role: string; provider: string; model: string }>({ name: '', role: '', provider: '', model: '' })
+  // B3：设置页维护的角色预设（只读镜像，用于"选中即填充"）。
+  const [presetList, setPresetList] = useState<WireRolePreset[]>([])
   const [kbOpen, setKbOpen] = useState(false)
   const [kbPathInput, setKbPathInput] = useState('')
   const [kbListing, setKbListing] = useState<WireKbListing | null>(null)
@@ -270,6 +278,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(true)
+  // R3：右栏面板可见性（设置页持久化的"点圆圈决定显示"）。
+  const [hiddenPanels, setHiddenPanels] = useState<string[]>([])
   // E1/E4：反馈开关（设置页持久化；默认开）。未知时先假设开，取到偏好后校正。
   const [feedbackEnabled, setFeedbackEnabled] = useState(true)
   // 已询问过反馈的会议 id（localStorage 记忆，避免每次轮询都弹）。
@@ -320,16 +330,23 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
   // Load the 互通 preference once; it decides whether this tab lists every
   // meeting in the workspace (on) or only meetings this conversation started.
+  // `hiddenPanels` (R3) additionally picks which right-column panels show.
   useEffect(() => {
-    void rpc<{ showAllMeetings?: boolean; feedbackEnabled?: boolean }>('roundtable/prefs.get', {})
+    void rpc<{ showAllMeetings?: boolean; feedbackEnabled?: boolean; hiddenPanels?: string[]; rolePresets?: WireRolePreset[] }>('roundtable/prefs.get', {})
       .then((result) => {
         if (result.ok) {
           if (typeof result.value?.showAllMeetings === 'boolean') setShowAll(result.value.showAllMeetings)
           if (typeof result.value?.feedbackEnabled === 'boolean') setFeedbackEnabled(result.value.feedbackEnabled)
+          if (Array.isArray(result.value?.hiddenPanels)) setHiddenPanels(result.value.hiddenPanels)
+          if (Array.isArray(result.value?.rolePresets)) setPresetList(result.value.rolePresets)
         }
       })
       .catch(() => undefined)
   }, [rpc])
+
+  /** R3：右栏面板的类名 —— 被用户在设置里关掉的面板加 hidden 类。 */
+  const panelClass = (id: string): string =>
+    [styles.panel, hiddenPanels.includes(id) ? styles.panelHidden : ''].filter(Boolean).join(' ')
 
   // Poll the snapshot every second.
   useEffect(() => {
@@ -774,6 +791,18 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     setForm((previous) => ({ ...previous, provider, model: '' }))
   }
 
+  /** B3：选中预设 → 填充 role/provider/model；专家 key 仍由用户自己填。 */
+  const applyPreset = (id: string): void => {
+    const preset = presetList.find((candidate) => candidate.id === id)
+    if (preset === undefined) return
+    setForm((previous) => ({
+      ...previous,
+      role: preset.role,
+      provider: preset.provider ?? '',
+      model: preset.model ?? '',
+    }))
+  }
+
   if (meeting === undefined) {
     return (
       <div className={styles.emptyState}>
@@ -1085,7 +1114,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             🗑 {translate('meetingDelete')}
           </button>
         </div>
-        <section className={styles.panel}>
+        <section className={panelClass('agents')} data-rt-panel="agents">
           <div className={styles.panelTitleRow}>
             <span className={styles.panelTitle}>{translate('agents')}</span>
             <button
@@ -1125,7 +1154,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </div>
         </section>
 
-        <section className={styles.panel}>
+        <section className={panelClass('tasks')} data-rt-panel="tasks">
           <div className={styles.panelTitleRow}>
             <span className={styles.panelTitle}>{translate('tasks')}</span>
             <button
@@ -1160,7 +1189,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </div>
         </section>
 
-        <section className={styles.panel}>
+        <section className={panelClass('kb')} data-rt-panel="kb">
           <div className={styles.panelTitleRow}>
             <span className={styles.panelTitle}>{translate('kb')}</span>
             <button
@@ -1182,7 +1211,25 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </div>
         </section>
 
-        <section className={styles.panel}>
+        <section className={panelClass('skills')} data-rt-panel="skills">
+          <div className={styles.panelTitleRow}>
+            <span className={styles.panelTitle}>{translate('skillsTitle')}</span>
+            <span className={styles.skillDeliveryLabel}>
+              {meeting.skillDelivery === 'direct'
+                ? translate('skillsDeliveryDirect')
+                : translate('skillsDeliveryRelay')}
+            </span>
+          </div>
+          <div className={styles.panelBody}>
+            {(meeting.skills ?? []).length === 0 ? (
+              <div className={styles.panelEmpty}>{translate('skillsEmpty')}</div>
+            ) : (meeting.skills ?? []).map((skillName) => (
+              <div className={styles.kbPathRow} key={skillName} title={skillName}>{skillName}</div>
+            ))}
+          </div>
+        </section>
+
+        <section className={panelClass('activity')} data-rt-panel="activity">
           <div className={styles.panelTitleRow}>
             <span className={styles.panelTitle}>{translate('activity')}</span>
           </div>
@@ -1203,7 +1250,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </div>
         </section>
 
-        <section className={styles.panel}>
+        <section className={panelClass('review')} data-rt-panel="review">
           <div className={styles.panelTitleRow}>
             <span className={styles.panelTitle}>{translate('reviewPanelTitle')}</span>
             {meeting.review !== null ? (
@@ -1238,7 +1285,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </div>
         </section>
 
-        <section className={styles.panel}>
+        <section className={panelClass('files')} data-rt-panel="files">
           <div className={styles.panelTitleRow}>
             <span className={styles.panelTitle}>{translate('files')}</span>
           </div>
@@ -1382,6 +1429,29 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
             <div className={styles.manageSectionTitle}>{translate('manageAddTitle')}</div>
             <div className={styles.manageForm}>
+              <div className={styles.manageFormRow}>
+                <label className={styles.manageLabel}>{translate('managePresetLabel')}</label>
+                {presetList.length === 0 ? (
+                  <div className={styles.manageHint}>{translate('managePresetEmpty')}</div>
+                ) : (
+                  <select
+                    className={styles.manageSelect}
+                    value=""
+                    onChange={(event) => applyPreset(event.target.value)}
+                  >
+                    <option value="">{translate('managePresetPlaceholder')}</option>
+                    {presetList.map((preset) => {
+                      const routed = preset.provider !== undefined && preset.provider !== ''
+                        && preset.model !== undefined && preset.model !== ''
+                      return (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name}{routed ? ` · ${preset.provider}/${preset.model}` : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                )}
+              </div>
               <div className={styles.manageFormRow}>
                 <label className={styles.manageLabel}>{translate('manageName')}</label>
                 <input

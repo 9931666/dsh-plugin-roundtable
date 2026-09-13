@@ -70,6 +70,20 @@ export type RoundTableKey =
   | 'settingsShowAllOn'
   | 'settingsShowAllOff'
   | 'settingsLimitsTitle'
+  | 'settingsSkillTitle'
+  | 'settingsSkillDelivery'
+  | 'settingsSkillDeliveryRelay'
+  | 'settingsSkillDeliveryDirect'
+  | 'settingsSkillDeliveryRelayHint'
+  | 'settingsSkillDeliveryDirectHint'
+  | 'skillsTitle'
+  | 'skillsEmpty'
+  | 'skillsDeliveryRelay'
+  | 'skillsDeliveryDirect'
+  | 'settingsPanelsTitle'
+  | 'settingsPanelsHint'
+  | 'panelOn'
+  | 'panelOff'
   | 'settingsExpertMaxTokens'
   | 'settingsExpertMaxTokensHint'
   | 'settingsExpertMaxOpinions'
@@ -156,6 +170,25 @@ export type RoundTableKey =
   | 'reviewImpactThresholdHint'
   | 'reviewImpactOk'
   | 'reviewExportHint'
+  | 'settingsPresetsTitle'
+  | 'settingsPresetsHint'
+  | 'settingsPresetsEmpty'
+  | 'settingsPresetName'
+  | 'settingsPresetNamePlaceholder'
+  | 'settingsPresetRole'
+  | 'settingsPresetRolePlaceholder'
+  | 'settingsPresetModel'
+  | 'settingsPresetAdd'
+  | 'settingsPresetEdit'
+  | 'settingsPresetSave'
+  | 'settingsPresetCancel'
+  | 'settingsPresetDelete'
+  | 'settingsPresetInvalid'
+  | 'settingsPresetLimit'
+  | 'settingsPresetUpdated'
+  | 'managePresetLabel'
+  | 'managePresetPlaceholder'
+  | 'managePresetEmpty'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -229,6 +262,20 @@ export const zh: Record<RoundTableKey, string> = {
   settingsShowAllOn: '开启',
   settingsShowAllOff: '关闭',
   settingsLimitsTitle: '回答限制（省 token）',
+  settingsSkillTitle: 'Skill（DSH 原生能力）',
+  settingsSkillDelivery: 'skill 传递方式',
+  settingsSkillDeliveryRelay: '主持人中转',
+  settingsSkillDeliveryDirect: '专家直接调用',
+  settingsSkillDeliveryRelayHint: '主持人读取 skill 正文后按需转交专家：省 token、行为可预测。',
+  settingsSkillDeliveryDirectHint: '专家自己用 skill 工具加载：更自主，但每个专家都会各自读取一遍。',
+  skillsTitle: '已选 skill',
+  skillsEmpty: '本次会议未选 skill',
+  skillsDeliveryRelay: '传递方式：主持人中转',
+  skillsDeliveryDirect: '传递方式：专家直接调用',
+  settingsPanelsTitle: '右栏面板显示',
+  settingsPanelsHint: '点亮的圆圈 = 在「圆桌会议」页右栏显示该面板；暗掉的即隐藏（保存后立即生效）。',
+  panelOn: '显示',
+  panelOff: '隐藏',
   settingsExpertMaxTokens: '专家每轮输出上限（token）',
   settingsExpertMaxTokensHint: '每次专家调用模型的输出 token 上限（max_tokens）；0 = 不限制（用模型默认）。',
   settingsExpertMaxOpinions: '专家每轮最多意见数',
@@ -315,6 +362,25 @@ export const zh: Record<RoundTableKey, string> = {
   feedbackAskSkip: '跳过',
   feedbackAskSubmitted: '谢谢反馈！可随时在设置 → 圆桌会议 → 用户反馈中关闭或清空。',
   feedbackAskFailed: '反馈提交失败',
+  settingsPresetsTitle: '角色预设',
+  settingsPresetsHint: '自己建几个常用角色，之后在会议的「专家管理」里选中即可自动填好角色说明与模型，不必每次手打。预设是全局偏好，改动不会影响已经创建的会议；插件不预置任何内置角色。',
+  settingsPresetsEmpty: '还没有预设。填下面两个必填项就能建第一条。',
+  settingsPresetName: '预设名称',
+  settingsPresetNamePlaceholder: '例：安全审查',
+  settingsPresetRole: '角色说明',
+  settingsPresetRolePlaceholder: '例：从安全视角挑毛病，只报可利用的风险与复现路径',
+  settingsPresetModel: '模型（可空 = 继承主持人）',
+  settingsPresetAdd: '新建预设',
+  settingsPresetEdit: '编辑',
+  settingsPresetSave: '保存预设',
+  settingsPresetCancel: '取消',
+  settingsPresetDelete: '删除',
+  settingsPresetInvalid: '预设名称与角色说明都不能为空',
+  settingsPresetLimit: '预设数量已达上限（{max} 条），请先删除不用的',
+  settingsPresetUpdated: '预设已更新',
+  managePresetLabel: '角色预设',
+  managePresetPlaceholder: '选择预设自动填充',
+  managePresetEmpty: '还没有预设：去「设置 → 圆桌会议 → 角色预设」新建一个。',
 }
 
 export const en: Record<RoundTableKey, string> = {
@@ -382,6 +448,20 @@ export const en: Record<RoundTableKey, string> = {
   settingsShowAllOn: 'On',
   settingsShowAllOff: 'Off',
   settingsLimitsTitle: 'Answer limits (save tokens)',
+  settingsSkillTitle: 'Skills (DSH native)',
+  settingsSkillDelivery: 'Skill delivery',
+  settingsSkillDeliveryRelay: 'Captain relays',
+  settingsSkillDeliveryDirect: "Experts load it themselves",
+  settingsSkillDeliveryRelayHint: 'The captain reads the skill and relays what matters: fewer tokens, predictable behaviour.',
+  settingsSkillDeliveryDirectHint: 'Each expert loads the skill itself with the skill tool: more autonomy, but every expert reads it separately.',
+  skillsTitle: 'Selected skills',
+  skillsEmpty: 'No skill selected for this meeting',
+  skillsDeliveryRelay: 'Delivery: captain relays',
+  skillsDeliveryDirect: 'Delivery: experts load themselves',
+  settingsPanelsTitle: 'Right column panels',
+  settingsPanelsHint: 'A lit circle shows that panel in the RoundTable tab; dimmed panels are hidden (takes effect after saving).',
+  panelOn: 'shown',
+  panelOff: 'hidden',
   settingsExpertMaxTokens: 'Expert output cap per round (tokens)',
   settingsExpertMaxTokensHint: 'max_tokens per expert model request; 0 = unlimited (provider default).',
   settingsExpertMaxOpinions: 'Max opinions per expert round',
@@ -468,4 +548,23 @@ export const en: Record<RoundTableKey, string> = {
   feedbackAskSkip: 'Skip',
   feedbackAskSubmitted: 'Thanks! Manage or clear feedback anytime under Settings → RoundTable → User feedback.',
   feedbackAskFailed: 'Failed to submit feedback',
+  settingsPresetsTitle: 'Role presets',
+  settingsPresetsHint: 'Save the roles you use often; picking one in the meeting\'s expert manager fills in the role text and model for you, so you stop retyping them. Presets are global preferences — editing them never changes a meeting that already exists, and no built-in role is shipped.',
+  settingsPresetsEmpty: 'No presets yet. The two required fields below create the first one.',
+  settingsPresetName: 'Preset name',
+  settingsPresetNamePlaceholder: 'e.g. Security review',
+  settingsPresetRole: 'Role description',
+  settingsPresetRolePlaceholder: 'e.g. Attack from a security angle: exploitable risks and repro paths only',
+  settingsPresetModel: 'Model (empty = inherit the captain)',
+  settingsPresetAdd: 'New preset',
+  settingsPresetEdit: 'Edit',
+  settingsPresetSave: 'Save preset',
+  settingsPresetCancel: 'Cancel',
+  settingsPresetDelete: 'Delete',
+  settingsPresetInvalid: 'Preset name and role description are both required',
+  settingsPresetLimit: 'Preset limit reached ({max}) — delete one first',
+  settingsPresetUpdated: 'Presets updated',
+  managePresetLabel: 'Role preset',
+  managePresetPlaceholder: 'Pick a preset to autofill',
+  managePresetEmpty: 'No presets yet — create one under Settings → RoundTable → Role presets.',
 }

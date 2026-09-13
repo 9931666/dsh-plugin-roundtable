@@ -14,28 +14,44 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
-import type { Meeting, MeetingDecision, MeetingEdge, MeetingNode, MeetingUtterance, ReviewRecord } from './types.ts'
+import { stat } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
+import type { Meeting, MeetingDecision, MeetingEdge, MeetingNode, MeetingUtterance, ReviewRecord, SkillDelivery, UserAction } from './types.ts'
 import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
 import {
   appendUtterance,
   clearUserActions,
   meetingDirOf,
+  readKbDigest,
   readMeeting,
   readReview,
   readTranscript,
   readUserActions,
+  readUserActionsReport,
   sanitizeKey,
   stateRootOf,
   withMeetingLock,
+  writeKbDigest,
   writeMeeting,
   writeReview,
+  writeTextAtomic,
 } from './state.ts'
+import { evaluateKbDigests, mergeKbDigestEntry } from './kb-digest.ts'
+import { PLUGIN_ID, HARNESS_RANGE } from './version.ts'
 import { buildCharter } from './charter.ts'
 import { aggregateUtterances } from './aggregator.ts'
 import { proxyThinkingPrompt } from './proxy-thinking.ts'
 import { beginRound, ensureActive, estimateTokens, MeetingMutedError } from './budget.ts'
 import { deliverToNode, interruptNode, nodeActivity, spawnNode, steerCaptain, type MemberRuntimeConfig } from './members.ts'
 import { splitByMarkers, splitUtterance, type SplitLlmLike } from './review-split.ts'
+import {
+  formatMeetingDraft,
+  PLAN_APPROVE_LABEL,
+  PLAN_REVISE_LABEL,
+  resolvePlanConfirmation,
+  type MeetingDraft,
+} from './plan.ts'
+import { listInvocableSkills, type SkillSummaryLike } from './skills.ts'
 
 /** Resolved plugin config consumed by the tools. */
 export interface ToolsConfig {
@@ -51,8 +67,20 @@ export interface ToolsConfig {
   memberMaxDepth?: number
   /** Live expert answer limits from settings (read at every spawn). */
   getExpertLimits?: () => { maxTokens: number; maxOpinions: number }
+  /** Live default skill-delivery mode from settings (R2.2/D5). */
+  getSkillDelivery?: () => SkillDelivery
+  /** 设置卡片默认值（R1，设置页那一层；调用时实时读取）。 */
+  getPlannedDefaults?: () => PlannedDefaults
   /** 观点拆分 LLM 路由（V0.2.2）：collect_review 时把发言拆成独立观点。 */
   reviewSplit?: { provider: string; model: string; maxOpinions: number }
+}
+
+/** Resolved defaults for one meeting's settings card (R1). */
+interface PlannedDefaults {
+  mode: 'orchestrated' | 'egalitarian' | 'redteam'
+  maxRounds: number
+  maxTokens: number
+  skillDelivery: SkillDelivery
 }
 
 const DEFAULT_MAX_ROUNDS = 10
@@ -204,11 +232,86 @@ async function recordUtterance(
   return full
 }
 
+/** One answered question as returned by the `userQuestions` seam. */
+interface AskUserQuestionAnswerItemLike {
+  id: string
+  selected: string[]
+  custom?: string
+}
+
+/* ------------------------------------------------------------------ *
+ * 会议设置卡片（R1）的默认值解析与卡片渲染。
+ *
+ * 默认值优先级（任务书 R1 第 3 条）：会议参数显式传入 > 插件
+ * PreferenceSchema（设置页）> 插件 Config 默认值。设置页那一层由 index.ts
+ * 通过 getPlannedDefaults 注入，这里只负责"显式传入 > 注入的偏好"。
+ * ------------------------------------------------------------------ */
+
+/** Normalize one meeting-mode argument (throws on garbage). */
+function normalizeMode(value: unknown, fallback: 'orchestrated' | 'egalitarian' | 'redteam'): 'orchestrated' | 'egalitarian' | 'redteam' {
+  if (value === undefined || value === null) return fallback
+  if (value === 'orchestrated' || value === 'egalitarian' || value === 'redteam') return value
+  throw new Error(`mode must be "orchestrated" | "egalitarian" | "redteam", got "${String(value)}"`)
+}
+
+/** Normalize one skill-delivery argument (throws on garbage). */
+function normalizeSkillDelivery(value: unknown, fallback: SkillDelivery): SkillDelivery {
+  if (value === undefined || value === null) return fallback
+  if (value === 'relay' || value === 'direct') return value
+  throw new Error(`skill_delivery must be "relay" | "direct", got "${String(value)}"`)
+}
+
+/** Sanitize a skill-name list: trim, drop empties, de-duplicate, cap at 20. */
+function normalizeSkillNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    const name = String(item ?? '').trim()
+    if (name === '' || out.includes(name)) continue
+    out.push(name)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
+/** 会议参数显式传入 > 设置页偏好 > Config 默认值。 */
+function plannedDefaults(config: ToolsConfig, args: Record<string, unknown>): PlannedDefaults {
+  const injected = config.getPlannedDefaults?.() ?? {
+    mode: config.defaultMode,
+    maxRounds: DEFAULT_MAX_ROUNDS,
+    maxTokens: DEFAULT_MAX_TOKENS,
+    skillDelivery: 'relay' as SkillDelivery,
+  }
+  const maxRounds = typeof args.max_rounds === 'number' && Number.isFinite(args.max_rounds) && args.max_rounds >= 1
+    ? Math.floor(args.max_rounds)
+    : injected.maxRounds
+  const maxTokens = typeof args.max_tokens === 'number' && Number.isFinite(args.max_tokens) && args.max_tokens >= 1000
+    ? Math.floor(args.max_tokens)
+    : injected.maxTokens
+  return {
+    mode: normalizeMode(args.mode, injected.mode),
+    maxRounds,
+    maxTokens,
+    skillDelivery: normalizeSkillDelivery(args.skill_delivery, injected.skillDelivery),
+  }
+}
+
+/** 渲染一张设置卡片的正文（放 `AskUserQuestionItem.detail`）。
+ *  渲染规则集中在 plan.ts，这里只做"加上当前可选 skill 清单"的转接。 */
+function renderPlanCard(
+  draft: MeetingDraft,
+  experts: readonly { key: string; role?: string; provider?: string; model?: string }[],
+  available: readonly SkillSummaryLike[],
+  options: { revised: boolean },
+): string {
+  return formatMeetingDraft(draft, experts, { revised: options.revised, availableSkills: available })
+}
+
 /** Register every `roundtable_*` tool into the shared tools registry. */
 export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void {
   ctx.tools.register(defineTool({
     name: 'roundtable_create',
-    description: 'Create a new RoundTable meeting: you (the calling agent) become the captain (主持人). A captain leads one active meeting at a time. Choose the collaboration mode: "orchestrated" means you decide who speaks and relay everything; "egalitarian" means experts message each other directly (a budget of max rounds/tokens then mutes the meeting — 闭麦).',
+    description: 'Create a new RoundTable meeting: you (the calling agent) become the captain (主持人). A captain leads one active meeting at a time. Preferred flow (v0.2.31): call roundtable_plan_meeting first, let the user confirm the draft card, then create the meeting with exactly the confirmed values (name/goal/mode/max_rounds/max_tokens/kb_path/skills/skill_delivery). Choose the collaboration mode: "orchestrated" means you decide who speaks and relay everything; "egalitarian" means experts message each other directly (a budget of max rounds/tokens then mutes the meeting — 闭麦).',
     parameters: {
       name: { type: 'string', required: true, description: 'Name for the new meeting (used as its stable id).' },
       goal: { type: 'string', required: true, description: 'Meeting background and core goal (charter section one) — the ultimate deliverable.' },
@@ -219,6 +322,17 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       },
       max_rounds: { type: 'integer', description: `Debate round cap (default ${DEFAULT_MAX_ROUNDS}); exceeding it mutes the meeting.` },
       max_tokens: { type: 'integer', description: `Total token budget for the meeting transcript (default ${DEFAULT_MAX_TOKENS}); exceeding it mutes the meeting.` },
+      kb_path: { type: 'string', description: '知识库目录（可选）：主持人按需读取其中文件并转交专家。相对路径按工作区解析。' },
+      skills: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '本次会议选中的 skill 名称清单（可选，来自 roundtable_plan_meeting 的卡片确认结果）。',
+      },
+      skill_delivery: {
+        type: 'string',
+        enum: ['relay', 'direct'],
+        description: 'skill 传递方式：relay=主持人中转（默认）；direct=专家自行用 skill 工具调用。',
+      },
     },
     output: {
       schema: {
@@ -230,11 +344,14 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           mode: { type: 'string', required: true },
           max_rounds: { type: 'integer', required: true },
           max_tokens: { type: 'integer', required: true },
+          kb_path: { type: 'string', required: true },
+          skills: { type: 'array', required: true, items: { type: 'string' } },
+          skill_delivery: { type: 'string', required: true },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `RoundTable meeting "${value.meeting_name}" created (id ${value.meeting_id}, mode ${value.mode}, budget ${value.max_rounds} rounds / ${value.max_tokens} tokens). You are the captain. Add expert nodes with roundtable_add_node.`,
+        text: `RoundTable meeting "${value.meeting_name}" created (id ${value.meeting_id}, mode ${value.mode}, budget ${value.max_rounds} rounds / ${value.max_tokens} tokens, kb ${value.kb_path === '' ? 'none' : value.kb_path}, skills ${value.skills.length === 0 ? 'none' : value.skills.join(', ')} via ${value.skill_delivery}). You are the captain. Add expert nodes with roundtable_add_node.`,
       }],
     },
     async execute(args, exec) {
@@ -244,10 +361,16 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const meetingName = String(args.name ?? '').trim()
       if (meetingName === '') throw new Error('meeting name must not be empty')
       const meetingId = sanitizeKey(meetingName)
-      const mode = (args.mode ?? config.defaultMode) as 'orchestrated' | 'egalitarian' | 'redteam'
-      if (mode !== 'orchestrated' && mode !== 'egalitarian' && mode !== 'redteam') {
-        throw new Error(`mode must be "orchestrated" | "egalitarian" | "redteam", got "${String(args.mode)}"`)
-      }
+      // R1 第 3 条：缺省值必须与设置页一致（显式传入 > 设置页偏好 > Config）。
+      // 主持人跳过设置卡片直接建会时，预算同样要落在设置页的值上。
+      const defaults = plannedDefaults(config, args as Record<string, unknown>)
+      const mode = defaults.mode
+      // 用户确认过的 skill 清单优先；未给（或给空）则回退到设置页的默认传递方式。
+      const requestedSkills = normalizeSkillNames(args.skills)
+      const skillDelivery = defaults.skillDelivery
+      const kbPath = typeof args.kb_path === 'string' ? args.kb_path.trim() : ''
+      const maxRounds = defaults.maxRounds
+      const maxTokens = defaults.maxTokens
       return withMeetingLock(captainLockKey(stateRoot, captain.id), async () => {
         const current = await findMeetingByCaptain(stateRoot, captain.id)
         if (current !== undefined) {
@@ -270,12 +393,15 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
             edges: [],
             decisions: [],
             budget: {
-              maxRounds: typeof args.max_rounds === 'number' ? Math.floor(args.max_rounds) : DEFAULT_MAX_ROUNDS,
-              maxTokens: typeof args.max_tokens === 'number' ? Math.floor(args.max_tokens) : DEFAULT_MAX_TOKENS,
+              maxRounds,
+              maxTokens,
               usedRounds: 0,
               usedTokens: 0,
             },
             round: 0,
+            ...(kbPath === '' ? {} : { kbPath }),
+            ...(requestedSkills.length === 0 ? {} : { skills: requestedSkills }),
+            skillDelivery,
             status: 'active',
             createdAt: now,
             updatedAt: now,
@@ -288,9 +414,170 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
             mode: meeting.mode,
             max_rounds: meeting.budget.maxRounds,
             max_tokens: meeting.budget.maxTokens,
+            kb_path: meeting.kbPath ?? '',
+            skills: meeting.skills ?? [],
+            skill_delivery: meeting.skillDelivery ?? skillDelivery,
           }
         })
       })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'roundtable_plan_meeting',
+    description: 'Show the human a MEETING SETTINGS CARD before creating anything (R1). This tool does NOT create a meeting: it composes a readable draft (experts, mode, budget, knowledge base, selected skills) from the user\'s request plus your plugin defaults, then BLOCKS until the user confirms. Returns decision="approved" plus the confirmed plan to pass to roundtable_create, or decision="revise" with the user\'s own words — update the draft and call this tool again (the card is shown again, revised=true). Call it for EVERY meeting, even a single-expert one.',
+    parameters: {
+      name: { type: 'string', required: true, description: '草案里的会议名称（也是会议 id 的来源）。' },
+      goal: { type: 'string', required: true, description: '会议背景与核心目标（总纲第一节）。' },
+      mode: { type: 'string', enum: ['orchestrated', 'egalitarian', 'redteam'], description: '协作模式；缺省用设置页的默认模式。' },
+      experts: {
+        type: 'array',
+        description: '草案里的专家名单（卡片上逐个列出）。',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            key: { type: 'string', required: true, description: '专家唯一标识，如 researcher。' },
+            role: { type: 'string', description: '角色说明，如 安全审查。' },
+            provider: { type: 'string', description: '模型路由（与 model 同时给出才生效；缺省继承主持人当前路由）。' },
+            model: { type: 'string', description: '模型名。' },
+          },
+        },
+      },
+      max_rounds: { type: 'integer', description: '轮数上限；缺省用设置页默认值。' },
+      max_tokens: { type: 'integer', description: 'Token 预算；缺省用设置页默认值。' },
+      kb_path: { type: 'string', description: '知识库目录（可空）。' },
+      skills: { type: 'array', items: { type: 'string' }, description: '选中 skill 的名称清单（可空）。' },
+      skill_delivery: { type: 'string', enum: ['relay', 'direct'], description: 'skill 传递方式；缺省用设置页默认值。' },
+      revised: { type: 'boolean', description: '本次是"用户要求修改后"的再次确认（卡片会标注已按意见更新）。' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          decision: { type: 'string', required: true },
+          user_note: { type: 'string', required: true },
+          name: { type: 'string', required: true },
+          goal: { type: 'string', required: true },
+          mode: { type: 'string', required: true },
+          max_rounds: { type: 'integer', required: true },
+          max_tokens: { type: 'integer', required: true },
+          kb_path: { type: 'string', required: true },
+          skills: { type: 'array', required: true, items: { type: 'string' } },
+          skill_delivery: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.decision === 'approved'
+          ? `用户已确认会议设置：创建 "${value.name}"（${value.mode}，${value.max_rounds} 轮 / ${value.max_tokens} tokens，kb ${value.kb_path === '' ? '未设置' : value.kb_path}，skills ${value.skills.length === 0 ? '未选' : value.skills.join(', ')}，skill 传递 ${value.skill_delivery}）。请用 roundtable_create 按这些值创建会议，然后逐个 roundtable_add_node。`
+          : value.decision === 'revise'
+            ? `用户要求修改：${value.user_note}\n请据此更新草案（保持未改动的项原样），再次调用 roundtable_plan_meeting 让用户确认；确认前不要创建会议。`
+            : `设置卡片未能取得用户答复（userQuestions 服务不可用或被中止）${value.user_note === '' ? '' : `：${value.user_note}`}。请把草案内容用文字告知用户，取得明确同意后再调用 roundtable_create。`,
+      }],
+    },
+    async execute(args, exec) {
+      const captain = requireCaptain(exec)
+      const workspace = workspaceOf(captain)
+      const defaults = plannedDefaults(config, args as Record<string, unknown>)
+      const name = String(args.name ?? '').trim()
+      const goal = String(args.goal ?? '').trim()
+      const kbPath = typeof args.kb_path === 'string' ? args.kb_path.trim() : ''
+      const skills = normalizeSkillNames(args.skills)
+      const experts = Array.isArray(args.experts)
+        ? (args.experts as unknown[]).flatMap((raw) => {
+            const entry = raw as { key?: unknown; role?: unknown; provider?: unknown; model?: unknown }
+            const key = String(entry?.key ?? '').trim()
+            if (key === '') return []
+            return [{
+              key,
+              role: entry?.role === undefined ? undefined : String(entry.role),
+              provider: entry?.provider === undefined ? undefined : String(entry.provider),
+              model: entry?.model === undefined ? undefined : String(entry.model),
+            }]
+          })
+        : []
+      const draft: MeetingDraft = {
+        name,
+        goal,
+        mode: defaults.mode,
+        maxRounds: defaults.maxRounds,
+        maxTokens: defaults.maxTokens,
+        kbPath,
+        skills,
+        skillDelivery: defaults.skillDelivery,
+      }
+      // 清单读取失败一律降级为空（skills.ts 内部已兜底）。
+      const available = await listInvocableSkills(ctx, workspace, exec.signal)
+      const detail = renderPlanCard(draft, experts, available, { revised: args.revised === true })
+
+      const userQuestions = ctx.get('userQuestions') as
+        | {
+            ask(request: {
+              questions: {
+                id: string
+                question: string
+                detail?: string
+                header?: string
+                options?: { label: string; description?: string }[]
+                intent?: { kind: 'plan-review'; approve: string }
+              }[]
+              agent?: Agent
+              signal?: AbortSignal
+            }): Promise<{ answers: AskUserQuestionAnswerItemLike[] }>
+          }
+        | undefined
+      const fallback = {
+        decision: 'unavailable',
+        user_note: userQuestions === undefined ? 'the userQuestions service is not mounted in this composition' : '',
+        name: draft.name,
+        goal: draft.goal,
+        mode: draft.mode,
+        max_rounds: draft.maxRounds,
+        max_tokens: draft.maxTokens,
+        kb_path: draft.kbPath,
+        skills: draft.skills,
+        skill_delivery: draft.skillDelivery,
+      }
+      if (userQuestions === undefined) return fallback
+
+      const questionId = randomUUID()
+      let answer
+      try {
+        answer = await userQuestions.ask({
+          questions: [{
+            id: questionId,
+            question: `确认「${draft.name.trim() === '' ? '未命名会议' : draft.name.trim()}」的会议设置？`,
+            detail,
+            header: '圆桌会议 · 会议设置确认',
+            options: [
+              { label: PLAN_APPROVE_LABEL, description: '按上方参数创建会议（专家随后由主持人逐个拉入）' },
+              { label: PLAN_REVISE_LABEL, description: '在输入框写明要改的地方，主持人会更新草案并再弹一次' },
+            ],
+            // 原生 plan-review 载体：detail 放 plan markdown，approve 指向批准选项。
+            intent: { kind: 'plan-review', approve: PLAN_APPROVE_LABEL },
+          }],
+          agent: captain,
+          signal: exec.signal,
+        })
+      } catch (error: unknown) {
+        return { ...fallback, decision: 'unavailable', user_note: `设置卡片不可用：${(error as Error).message}` }
+      }
+      const item = answer.answers.find((candidate) => candidate.id === questionId)
+      const confirmation = resolvePlanConfirmation(item)
+      return {
+        decision: confirmation.kind,
+        user_note: confirmation.kind === 'revise' || confirmation.kind === 'unavailable' ? confirmation.note : '',
+        name: draft.name,
+        goal: draft.goal,
+        mode: draft.mode,
+        max_rounds: draft.maxRounds,
+        max_tokens: draft.maxTokens,
+        kb_path: draft.kbPath,
+        skills: draft.skills,
+        skill_delivery: draft.skillDelivery,
+      }
     },
   }))
 
@@ -302,6 +589,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       role: { type: 'string', description: 'Role description for this expert (e.g. "security reviewer").' },
       provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model.' },
       model: { type: 'string', description: 'Optional model override. Omit to inherit your current model.' },
+      reasoning_effort: { type: 'string', description: 'Optional adapter-owned reasoning-effort id for this expert (e.g. high / medium / low — the exact vocabulary is defined by the model capability, not by this plugin). Omit to inherit your own route-owned effort.' },
     },
     output: {
       schema: {
@@ -312,12 +600,13 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           node_id: { type: 'string', required: true },
           provider: { type: 'string', required: true },
           model: { type: 'string', required: true },
+          reasoning_effort: { type: 'string', required: true },
           status: { type: 'string', required: true },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Node "${value.node_name}" joined (subagent id ${value.node_id}, ${value.provider}/${value.model}, status ${value.status}).`,
+        text: `Node "${value.node_name}" joined (subagent id ${value.node_id}, ${value.provider}/${value.model}${value.reasoning_effort === '' ? '' : ` @ ${value.reasoning_effort}`}, status ${value.status}).`,
       }],
     },
     async execute(args, exec) {
@@ -341,20 +630,29 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         if (fresh.nodes.filter((candidate) => candidate.status !== 'removed').length >= config.maxNodes) {
           throw new Error(`meeting "${fresh.name}" is at its node cap (${config.maxNodes})`)
         }
+        // A2/A5: reasoning effort is captured on the node and forwarded by
+        // spawnNode; an empty value means "inherit the captain's effort".
+        const reasoningEffort = args.reasoning_effort !== undefined ? String(args.reasoning_effort).trim() : ''
         const node: MeetingNode = {
           id: '',
           key: nodeKey,
           role: args.role !== undefined ? String(args.role) : undefined,
           provider: args.provider !== undefined ? String(args.provider) : captain.options.provider,
           model: args.model !== undefined ? String(args.model) : captain.options.model,
+          reasoningEffort: reasoningEffort === '' ? undefined : reasoningEffort,
           status: 'idle',
           joinedAt: Date.now(),
         }
         const limits = config.getExpertLimits?.() ?? { maxTokens: 0, maxOpinions: 0 }
+        // R2：会议选中的 skill 清单随 persona 注入；direct 模式下专家需自行
+        // 用 `skill` 工具加载，所以清单必须写进 persona（见 members.ts）。
         await spawnNode(ctx, {
           provider: config.memberProvider,
           maxDepth: config.memberMaxDepth,
-        } as MemberRuntimeConfig, fresh, node, captain, config.stateDir, exec.signal, limits)
+        } as MemberRuntimeConfig, fresh, node, captain, config.stateDir, exec.signal, limits, {
+          names: fresh.skills ?? [],
+          delivery: fresh.skillDelivery ?? config.getSkillDelivery?.() ?? 'relay',
+        })
         fresh.nodes.push(node)
         fresh.charter = buildCharter(fresh)
         try {
@@ -368,6 +666,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           node_id: node.id,
           provider: node.provider ?? '',
           model: node.model ?? '',
+          reasoning_effort: node.reasoningEffort ?? '',
           status: node.status,
         }
       })
@@ -751,6 +1050,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         viewer: identity.kind === 'captain' ? CAPTAIN_KEY : identity.name,
         round: meeting.round,
         kb_path: meeting.kbPath ?? '',
+        skills: meeting.skills ?? [],
+        skill_delivery: meeting.skillDelivery ?? config.getSkillDelivery?.() ?? 'relay',
         budget: {
           max_rounds: meeting.budget.maxRounds,
           max_tokens: meeting.budget.maxTokens,
@@ -764,6 +1065,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
             role: node.role ?? '',
             provider: node.provider ?? '',
             model: node.model ?? '',
+            reasoning_effort: node.reasoningEffort ?? '',
             status: node.status,
             activity: activity.get(node.key) ?? 'unspawned',
           })),
@@ -792,13 +1094,76 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           to: utterance.to ?? '',
           round: utterance.round,
         })),
+        kb_digest: await kbDigestOverview(stateRoot, meeting.id),
       }
     },
   }))
 
   ctx.tools.register(defineTool({
+    name: 'roundtable_kb_digest',
+    description: 'Record (or refresh) a knowledge-base digest in the meeting cache after YOU read a KB file. The plugin stats the file itself and stores path+size+mtimeMs as the invalidation key; from then on roundtable_status shows that entry with valid=true and you reuse the summary instead of reading the file again — this is what stops you and the expert paying for the same file twice, and the cache itself costs no tokens. Check roundtable_status FIRST: if the entry is already valid, reuse it and do not read the file. Requires the captain.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'KB file path: absolute, or relative to the meeting\'s kb_path.' },
+      digest: { type: 'string', required: true, description: 'The distilled points you will actually reuse (a summary, not a copy of the file).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          path: { type: 'string', required: true },
+          size: { type: 'integer', required: true },
+          mtime_ms: { type: 'integer', required: true },
+          cached_entries: { type: 'integer', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Knowledge-base digest cached for ${value.path} (${value.size} bytes); ${value.cached_entries} entry(ies) in this meeting's cache.`,
+      }],
+    },
+    async execute(args, exec) {
+      const captain = requireCaptain(exec)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'record a knowledge-base digest', async (fresh) => {
+        const raw = String(args.path ?? '').trim()
+        if (raw === '') throw new Error('path must not be empty')
+        // Relative paths resolve against the meeting's own kb_path so the
+        // captain can write the short name it just saw in the KB listing.
+        const kbPath = fresh.kbPath ?? ''
+        const resolved = isAbsolute(raw) ? raw : (kbPath === '' ? raw : join(kbPath, raw))
+        let info
+        try {
+          info = await stat(resolved)
+        } catch {
+          throw new Error(`knowledge-base file not found or unreadable: ${resolved}`)
+        }
+        if (!info.isFile()) throw new Error(`not a file: ${resolved}`)
+        const digestText = String(args.digest ?? '').trim()
+        if (digestText === '') throw new Error('digest must not be empty')
+        const cache = await readKbDigest(stateRoot, fresh.id)
+        const entries = mergeKbDigestEntry(cache.entries, {
+          path: resolved,
+          size: info.size,
+          mtimeMs: info.mtimeMs,
+          digest: digestText,
+          ts: Date.now(),
+        })
+        await writeKbDigest(stateRoot, fresh.id, entries)
+        return {
+          path: resolved,
+          size: info.size,
+          mtime_ms: Math.round(info.mtimeMs),
+          cached_entries: entries.length,
+        }
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'roundtable_actions_clear',
-    description: 'Clear the meeting\'s pending user-actions file (user-actions.jsonl) after you executed every recorded action with the roundtable_* tools. Only call this after each action was applied successfully; on a failure keep the record and explain why. Returns how many actions were cleared.',
+    description: 'Clear the meeting\'s pending user-actions file (user-actions.jsonl) after you executed every recorded action with the roundtable_* tools. Only call this after each action was applied successfully; on a failure keep the record and explain why. Returns how many actions were cleared, plus how many unparseable lines had to be dropped (report a non-zero count to the user — an action was lost).',
     parameters: {},
     output: {
       schema: {
@@ -806,21 +1171,23 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         additionalProperties: false,
         properties: {
           cleared: { type: 'integer', required: true },
+          malformed: { type: 'integer', required: true },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Cleared ${value.cleared} pending user action(s).`,
+        text: value.malformed > 0
+          ? `Cleared ${value.cleared} pending user action(s), and dropped ${value.malformed} unparseable line(s) — tell the user those operations were lost and could not be executed.`
+          : `Cleared ${value.cleared} pending user action(s).`,
       }],
     },
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
       const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
       const located = await locateCaptainMeeting(stateRoot, captain.id)
-      const cleared = await withCaptainLock(stateRoot, located.id, captain.id, 'clear user actions', async (fresh) => {
+      return withCaptainLock(stateRoot, located.id, captain.id, 'clear user actions', async (fresh) => {
         return clearUserActions(stateRoot, fresh.id)
       })
-      return { cleared }
     },
   }))
 
@@ -1082,6 +1449,47 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
   }))
 
   ctx.tools.register(defineTool({
+    name: 'roundtable_export_meeting',
+    description: 'Export the WHOLE meeting — issue-style header (plugin version, mode, time span, budget), goal, expert roster, the decision log, every round of the transcript with speaker → audience, the review record when one exists, and the user adjustment log — as a Markdown deliverable. Returns the Markdown AND writes it to <meetingDir>/export.md so the user can open the file directly. It works on an in-progress meeting too (the header then marks it as a snapshot). Requires the captain.',
+    parameters: {
+      save: { type: 'boolean', description: 'Also write the Markdown to <meetingDir>/export.md (default true). Pass false to only return the text.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          markdown: { type: 'string', required: true },
+          saved_to: { type: 'string', required: true },
+          bytes: { type: 'integer', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.saved_to === ''
+          ? value.markdown
+          : `${value.markdown}\n\n---\n（已同时写入 ${value.saved_to}，${value.bytes} 字节）`,
+      }],
+    },
+    async execute(args, exec) {
+      const captain = requireCaptain(exec)
+      const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
+      const located = await locateCaptainMeeting(stateRoot, captain.id)
+      return withCaptainLock(stateRoot, located.id, captain.id, 'export the meeting', async (fresh) => {
+        const utterances = await readTranscript(stateRoot, fresh.id)
+        const { actions } = await readUserActionsReport(stateRoot, fresh.id)
+        const review = await readReview(stateRoot, fresh.id)
+        const markdown = renderMeetingMarkdown(fresh, utterances, actions, review)
+        const bytes = Buffer.byteLength(markdown, 'utf8')
+        if (args.save === false) return { markdown, saved_to: '', bytes }
+        const file = join(meetingDirOf(stateRoot, fresh.id), 'export.md')
+        await writeTextAtomic(file, markdown)
+        return { markdown, saved_to: file, bytes }
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'roundtable_set_budget',
     description: 'Adjust the meeting budget. Top up max_rounds/max_tokens to unmute (闭麦后恢复) a muted meeting, or tighten them. Requires the captain.',
     parameters: {
@@ -1198,6 +1606,35 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 }
 
 /** Render the status snapshot as compact text for the model. */
+/** 知识库摘要缓存概览（C2）。
+ *
+ *  每条都用磁盘现状标注 valid：主持人据此决定"直接用摘要"还是"重读文件"，
+ *  不必自己猜 mtime。条目上限 50、每条摘要上限 2000 字符（见 kb-digest.ts）。 */
+async function kbDigestOverview(stateRoot: string, meetingId: string): Promise<{
+  count: number
+  valid_count: number
+  entries: { path: string; size: number; mtime_ms: number; digest: string; valid: boolean; updated_at: string }[]
+}> {
+  const cache = await readKbDigest(stateRoot, meetingId)
+  const evaluated = await evaluateKbDigests(cache.entries)
+  return {
+    count: evaluated.length,
+    valid_count: evaluated.filter((entry) => entry.valid).length,
+    entries: evaluated.map((entry) => ({
+      path: entry.path,
+      size: entry.size,
+      mtime_ms: Math.round(entry.mtimeMs),
+      digest: entry.digest,
+      valid: entry.valid,
+      updated_at: new Date(entry.ts).toISOString(),
+    })),
+  }
+}
+
+/** 状态行里最多列几条缓存、每条摘要最多显示多少字符（避免状态输出失控）。 */
+const KB_DIGEST_RENDER_LIMIT = 10
+const KB_DIGEST_RENDER_CHARS = 800
+
 function renderStatus(value: Record<string, unknown>): string {
   const nodes = Array.isArray(value.nodes) ? value.nodes as Record<string, unknown>[] : []
   const edges = Array.isArray(value.edges) ? value.edges as Record<string, unknown>[] : []
@@ -1205,16 +1642,29 @@ function renderStatus(value: Record<string, unknown>): string {
   const pending = Array.isArray(value.pending_decisions) ? value.pending_decisions as Record<string, unknown>[] : []
   const pendingActions = Array.isArray(value.pending_actions) ? value.pending_actions as Record<string, unknown>[] : []
   const recent = Array.isArray(value.recent_utterances) ? value.recent_utterances as Record<string, unknown>[] : []
+  const kbDigest = (value.kb_digest ?? {}) as Record<string, unknown>
+  const kbEntries = Array.isArray(kbDigest.entries) ? kbDigest.entries as Record<string, unknown>[] : []
+  const kbListed = kbEntries.slice(0, KB_DIGEST_RENDER_LIMIT)
   const lines: string[] = [
     `Meeting "${String(value.meeting_name)}" (id ${String(value.meeting_id)}, mode ${String(value.mode)}, status ${String(value.status)}, round ${String(value.round)})`,
     `Knowledge base path: ${String(value.kb_path ?? '') === '' ? '(none)' : String(value.kb_path)}`,
-    `Budget: ${String(budget.used_rounds)}/${String(budget.max_rounds)} rounds, ${String(budget.used_tokens)}/${String(budget.max_tokens)} tokens`,
+    `Budget: ${String(budget.used_rounds)}/${String(budget.max_rounds)} rounds, ${String(budget.used_tokens)}/${String(budget.max_tokens)} tokens (spoken-text estimate only — NOT the real LLM spend)`,
     `Nodes (${nodes.length}):`,
-    ...nodes.map((node) => `  - ${String(node.key)} [${String(node.role ?? '')}] ${String(node.status)}/${String(node.activity ?? '')} · ${String(node.provider ?? '')}/${String(node.model ?? '')}`),
+    ...nodes.map((node) => {
+      const effort = String(node.reasoning_effort ?? '')
+      return `  - ${String(node.key)} [${String(node.role ?? '')}] ${String(node.status)}/${String(node.activity ?? '')} · ${String(node.provider ?? '')}/${String(node.model ?? '')}${effort === '' ? '' : ` @${effort}`}`
+    }),
     `Edges (${edges.length}):`,
     ...edges.map((edge) => `  - ${String(edge.from)} → ${String(edge.to)} (${String(edge.direction)})`),
     `Pending decisions: ${pending.length === 0 ? 'none' : pending.map((decision) => `"${String(decision.question)}"`).join('; ')}`,
     `Pending user actions (${pendingActions.length}): ${pendingActions.length === 0 ? 'none' : pendingActions.map((action) => `"${String(action.text)}"`).join('; ')}`,
+    `KB digest cache: ${String(kbDigest.count ?? 0)} entry(ies), ${String(kbDigest.valid_count ?? 0)} still valid (HIT = reuse the digest; STALE = the file changed, read it again):`,
+    ...kbListed.map((entry) => {
+      const digest = String(entry.digest ?? '')
+      const shown = digest.length > KB_DIGEST_RENDER_CHARS ? `${digest.slice(0, KB_DIGEST_RENDER_CHARS)}…` : digest
+      return `  - [${entry.valid === true ? 'HIT' : 'STALE'}] ${String(entry.path)}: ${shown}`
+    }),
+    ...(kbEntries.length > kbListed.length ? [`  - …and ${kbEntries.length - kbListed.length} more cached entr(ies)`] : []),
     `Recent transcript:`,
     ...recent.map((utterance) => `  [R${String(utterance.round)}] ${String(utterance.speaker)}${String(utterance.to ?? '') === '' ? '' : ` → ${String(utterance.to)}`}: ${String(utterance.content)}`),
   ]
@@ -1249,7 +1699,7 @@ function renderReviewMarkdown(review: ReviewRecord, meeting: Meeting): string {
   out.push('# 针锋相对评审记录', '')
   out.push('---')
   out.push('<!-- 以下为预填的 issue 元数据，可整段作为 GitHub issue 模板 -->')
-  out.push(`- **插件**：@huanlin/dsh-plugin-roundtable v0.2.21（DeepSeek Harness 0.1.5-rc.1+）`)
+  out.push(`- **插件**：${PLUGIN_ID}（${HARNESS_RANGE}）`)
   out.push(`- **协作模式**：${meeting.mode}`)
   const expertRoutes = meeting.nodes
     .filter((node) => node.status !== 'removed')
@@ -1257,6 +1707,13 @@ function renderReviewMarkdown(review: ReviewRecord, meeting: Meeting): string {
   out.push(`- **专家**：${expertRoutes.length === 0 ? '-' : expertRoutes.join('、')}`)
   out.push(`- **预算用量**：${meeting.budget.usedRounds}/${meeting.budget.maxRounds} 轮 · ${meeting.budget.usedTokens}/${meeting.budget.maxTokens} token`)
   out.push('---', '')
+  out.push(renderReviewBody(review))
+  return out.join('\n')
+}
+
+/** 评审主体（不含 issue 头部）：整场会议导出复用它，避免头部重复。 */
+function renderReviewBody(review: ReviewRecord): string {
+  const out: string[] = []
   out.push(`## 评审轮次 ${review.reviewPass}/${review.maxReviewPass} · ${review.status === 'done' ? '已完成' : review.status === 'ready' ? '待表态' : '收集中'}`)
   out.push('', '## 原始问题', '', review.question, '', '## 本轮方案（待攻击对象）', '', review.plan, '')
   const endorsed = review.viewpoints.filter((viewpoint) => viewpoint.status === 'endorsed')
@@ -1292,5 +1749,105 @@ function renderReviewMarkdown(review: ReviewRecord, meeting: Meeting): string {
       out.push('')
     }
   }
+  return out.join('\n')
+}
+
+/** 单条发言在导出里的字符上限（超出截断并标注，避免导出物失控）。 */
+const EXPORT_UTTERANCE_CHARS = 4000
+
+/** 本地时区的可读时间戳（导出物是给人看的，不用 UTC）。 */
+function formatStamp(ts: number): string {
+  const date = new Date(ts)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+    + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/**
+ * 把一场会议整体渲染成 Markdown 交付物（B6）。
+ *
+ * 只读既有磁盘状态（`meeting.json` / `transcript.jsonl` / `review.json` /
+ * `user-actions.jsonl`），**不新增任何状态**；会议进行中也能导出，此时头部
+ * 会标注"进行中快照"，避免把半场会议误当成结论。
+ */
+export function renderMeetingMarkdown(
+  meeting: Meeting,
+  utterances: readonly MeetingUtterance[],
+  userActions: readonly UserAction[],
+  review: ReviewRecord | undefined,
+): string {
+  const out: string[] = []
+  const running = meeting.status !== 'ended'
+  out.push(`# 圆桌会议记录 · ${meeting.name}`, '')
+  out.push('---')
+  out.push('<!-- 以下为预填的会议元数据，可整段作为 issue / 归档记录的头部 -->')
+  out.push(`- **插件**：${PLUGIN_ID}（${HARNESS_RANGE}）`)
+  out.push(`- **会议 id**：${meeting.id}`)
+  out.push(`- **协作模式**：${meeting.mode}`)
+  out.push(`- **状态**：${meeting.status}${running ? '（进行中快照）' : ''}`)
+  out.push(`- **创建时间**：${formatStamp(meeting.createdAt)}`)
+  out.push(`- **${running ? '最后更新' : '结束时间'}**：${formatStamp(meeting.updatedAt)}`)
+  out.push(`- **预算用量**：${meeting.budget.usedRounds}/${meeting.budget.maxRounds} 轮 · ${meeting.budget.usedTokens}/${meeting.budget.maxTokens} token`)
+  if ((meeting.kbPath ?? '') !== '') out.push(`- **知识库**：${meeting.kbPath}`)
+  if ((meeting.skills ?? []).length > 0) {
+    out.push(`- **skill**：${(meeting.skills ?? []).map((skill) => `\`${skill}\``).join('、')}（传递方式 ${meeting.skillDelivery ?? 'relay'}）`)
+  }
+  out.push('---', '')
+
+  out.push('## 议题 / 目标', '', meeting.goal.trim() === '' ? '（未提供）' : meeting.goal.trim(), '')
+
+  out.push(`## 专家名单（${meeting.nodes.length}）`, '')
+  if (meeting.nodes.length === 0) out.push('（无）')
+  for (const node of meeting.nodes) {
+    const route = `${node.provider ?? '（继承主持人）'}/${node.model ?? '（继承主持人）'}`
+    const effort = (node.reasoningEffort ?? '') === '' ? '' : ` @${node.reasoningEffort}`
+    const role = (node.role ?? '') === '' ? '（未填角色）' : node.role
+    out.push(`- \`${node.key}\` — ${role} — ${route}${effort} — 状态 ${node.status}`)
+  }
+  out.push('')
+
+  out.push(`## 决策记录（${meeting.decisions.length}）`, '')
+  if (meeting.decisions.length === 0) out.push('（无）')
+  for (const decision of meeting.decisions) {
+    out.push(`- **[${decision.status === 'resolved' ? '已决' : '待决'}]** ${decision.question}`)
+    out.push(`  - 选项：${decision.options.length === 0 ? '（无）' : decision.options.join(' / ')}`)
+    if (decision.chosen !== undefined) out.push(`  - 用户选择：${decision.chosen}`)
+    if (decision.customAnswer !== undefined) out.push(`  - 自定义答案：${decision.customAnswer}`)
+    out.push(`  - 时间：${formatStamp(decision.ts)}`)
+  }
+  out.push('')
+
+  // 发言按轮次分组；同一轮内保持写入顺序（读取顺序即发言顺序）。
+  out.push(`## 发言记录（${utterances.length} 条）`, '')
+  if (utterances.length === 0) {
+    out.push('（无）', '')
+  } else {
+    const rounds = [...new Set(utterances.map((utterance) => utterance.round))].sort((a, b) => a - b)
+    for (const round of rounds) {
+      out.push(`### 第 ${round} 轮`, '')
+      for (const utterance of utterances.filter((candidate) => candidate.round === round)) {
+        const audience = (utterance.to ?? '') === '' ? '汇聚网关' : utterance.to
+        const kind = utterance.kind === 'speech' ? '' : ` · ${utterance.kind}`
+        out.push(`**${utterance.nodeKey} → ${audience}** · ${formatStamp(utterance.ts)}${kind}`)
+        const shown = utterance.content.length > EXPORT_UTTERANCE_CHARS
+          ? `${utterance.content.slice(0, EXPORT_UTTERANCE_CHARS)}\n\n…（已截断，原长 ${utterance.content.length} 字符）`
+          : utterance.content
+        out.push('', shown, '')
+      }
+    }
+  }
+
+  if (review !== undefined) {
+    out.push('---', '', '# 针锋相对评审记录', '', renderReviewBody(review), '')
+  }
+
+  out.push('---', '', `## 用户调整记录（${userActions.length}）`, '')
+  out.push('> 只包含尚未被主持人清空的记录；已执行并清空的调整不会出现在导出里。', '')
+  if (userActions.length === 0) out.push('（无）')
+  for (const action of userActions) {
+    const key = (action.nodeKey ?? '') === '' ? '' : ` · ${action.nodeKey}`
+    out.push(`- ${formatStamp(action.ts)} · ${action.kind}${key}：${action.text}`)
+  }
+  out.push('')
   return out.join('\n')
 }

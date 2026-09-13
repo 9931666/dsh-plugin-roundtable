@@ -7,13 +7,14 @@
  * - `transcript.jsonl` — append-only utterance log (torn-tail tolerant on read).
  * - `review.json`      — 针锋相对评审记录（议题/方案/观点/支持标记）。
  * - `user-actions.jsonl` — UI 行为记录（主持人下轮执行）。
+ * - `kb-digest.json`   — 知识库摘要缓存（C2：命中即免去重读）。
  * @module dsh-plugin-roundtable/state
  */
 
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import type { FeedbackEntry, Meeting, MeetingUtterance, ReviewRecord, UserAction } from './types.ts'
+import type { FeedbackEntry, KbDigestEntry, KbDigestFile, Meeting, MeetingUtterance, ReviewRecord, UserAction } from './types.ts'
 
 /** Stable directory id from a display name (keeps CJK, lowercases latin). */
 export function sanitizeKey(value: string): string {
@@ -42,16 +43,35 @@ export function meetingDirOf(stateRoot: string, meetingId: string): string {
   return join(stateRoot, meetingId)
 }
 
-/** Atomically publish a JSON file (same-directory tmp + rename). */
-async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+/**
+ * Atomically publish a UTF-8 text file (same-directory tmp + rename).
+ *
+ * A reader therefore only ever sees the previous content or the new one —
+ * never a truncated in-between state. When the rename itself fails the tmp
+ * file is moved aside as `.stale-<uuid>` rather than left as a dirty file
+ * that a later reader could mistake for real content.
+ */
+export async function writeTextAtomic(file: string, text: string): Promise<void> {
   const tmp = join(dirname(file), `.${randomUUID()}.tmp`)
-  await writeFile(tmp, JSON.stringify(value, null, 2), 'utf8')
+  await writeFile(tmp, text, 'utf8')
   try {
     await rename(tmp, file)
   } catch (error: unknown) {
     await rename(tmp, `${file}.stale-${randomUUID()}`).catch(() => undefined)
     throw error
   }
+}
+
+/** Atomically publish a JSON file (same-directory tmp + rename). */
+async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+  await writeTextAtomic(file, JSON.stringify(value, null, 2))
+}
+
+/** Lock key serializing append (UI) against clear (captain) for one meeting's
+ *  `user-actions.jsonl`. Without it a clear could rename over a line the UI
+ *  was midway through appending, orphaning a user action (A2). */
+function userActionsLockKey(stateRoot: string, meetingId: string): string {
+  return `user-actions:${stateRoot}:${meetingId}`
 }
 
 /** Read one meeting record; undefined when absent. */
@@ -80,11 +100,22 @@ export async function writeCharter(stateRoot: string, meeting: Meeting): Promise
   await writeFile(join(dir, 'charter.md'), meeting.charter, 'utf8')
 }
 
+/** Lock key serializing transcript appends for one meeting (A3).
+ *
+ *  `O_APPEND` already makes a single short line atomic, but this closes the
+ *  remaining interleaving window (long lines, lifecycle-event races) so two
+ *  utterances can never end up written into each other. */
+function transcriptLockKey(stateRoot: string, meetingId: string): string {
+  return `transcript:${stateRoot}:${meetingId}`
+}
+
 /** Append one utterance to the meeting transcript (JSONL). */
 export async function appendUtterance(stateRoot: string, meetingId: string, utterance: MeetingUtterance): Promise<void> {
-  const dir = meetingDirOf(stateRoot, meetingId)
-  await mkdir(dir, { recursive: true })
-  await appendFile(join(dir, 'transcript.jsonl'), JSON.stringify(utterance) + '\n', 'utf8')
+  await withMeetingLock(transcriptLockKey(stateRoot, meetingId), async () => {
+    const dir = meetingDirOf(stateRoot, meetingId)
+    await mkdir(dir, { recursive: true })
+    await appendFile(join(dir, 'transcript.jsonl'), JSON.stringify(utterance) + '\n', 'utf8')
+  })
 }
 
 /** Read the full transcript, skipping torn tails and malformed lines. */
@@ -118,40 +149,70 @@ export async function listMeetings(stateRoot: string): Promise<string[]> {
   }
 }
 
-/** Append one user action to the meeting's `user-actions.jsonl` (JSONL). */
+/** Append one user action to the meeting's `user-actions.jsonl` (JSONL).
+ *  Serialized against {@link clearUserActions} so an append can never race a
+ *  clear (A2). A single short line stays atomic under `O_APPEND`. */
 export async function appendUserAction(stateRoot: string, meetingId: string, action: UserAction): Promise<void> {
-  const dir = meetingDirOf(stateRoot, meetingId)
-  await mkdir(dir, { recursive: true })
-  await appendFile(join(dir, 'user-actions.jsonl'), JSON.stringify(action) + '\n', 'utf8')
+  await withMeetingLock(userActionsLockKey(stateRoot, meetingId), async () => {
+    const dir = meetingDirOf(stateRoot, meetingId)
+    await mkdir(dir, { recursive: true })
+    await appendFile(join(dir, 'user-actions.jsonl'), JSON.stringify(action) + '\n', 'utf8')
+  })
 }
 
-/** Read every pending user action, skipping torn tails and malformed lines. */
-export async function readUserActions(stateRoot: string, meetingId: string): Promise<UserAction[]> {
+/** Result of parsing `user-actions.jsonl`: the usable actions plus the number
+ *  of lines that were NOT valid JSON. The count exists so a torn tail is
+ *  *reported* instead of silently vanishing (A2). */
+export interface UserActionsReport {
+  actions: UserAction[]
+  /** Unparseable lines (torn tail / half-written JSON) that were dropped. */
+  malformed: number
+}
+
+/** Read every pending user action, counting rather than hiding bad lines. */
+export async function readUserActionsReport(stateRoot: string, meetingId: string): Promise<UserActionsReport> {
   try {
     const raw = await readFile(join(stateRoot, meetingId, 'user-actions.jsonl'), 'utf8')
-    const out: UserAction[] = []
+    const actions: UserAction[] = []
+    let malformed = 0
     for (const line of raw.split(/\r?\n/)) {
       if (line.trim() === '') continue
       try {
-        out.push(JSON.parse(line) as UserAction)
+        actions.push(JSON.parse(line) as UserAction)
       } catch {
-        // Torn or malformed tail line: ignore and keep reading.
+        malformed += 1
       }
     }
-    return out
+    return { actions, malformed }
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { actions: [], malformed: 0 }
     throw error
   }
 }
 
-/** Clear every pending user action; returns how many were dropped. */
-export async function clearUserActions(stateRoot: string, meetingId: string): Promise<number> {
-  const dir = meetingDirOf(stateRoot, meetingId)
-  await mkdir(dir, { recursive: true })
-  const before = await readUserActions(stateRoot, meetingId)
-  await writeFile(join(dir, 'user-actions.jsonl'), '', 'utf8')
-  return before.length
+/** Read every pending user action, skipping torn tails and malformed lines. */
+export async function readUserActions(stateRoot: string, meetingId: string): Promise<UserAction[]> {
+  return (await readUserActionsReport(stateRoot, meetingId)).actions
+}
+
+/**
+ * Clear every pending user action, atomically and under the append lock.
+ *
+ * Returns both how many actions were cleared and how many unparseable lines
+ * were dropped, so the captain can tell the user the truth about a loss
+ * instead of reporting a clean sweep that never happened (A2).
+ */
+export async function clearUserActions(
+  stateRoot: string,
+  meetingId: string,
+): Promise<{ cleared: number; malformed: number }> {
+  return withMeetingLock(userActionsLockKey(stateRoot, meetingId), async () => {
+    const dir = meetingDirOf(stateRoot, meetingId)
+    await mkdir(dir, { recursive: true })
+    const { actions, malformed } = await readUserActionsReport(stateRoot, meetingId)
+    await writeTextAtomic(join(dir, 'user-actions.jsonl'), '')
+    return { cleared: actions.length, malformed }
+  })
 }
 
 /** Read the 针锋相对 review record; undefined when absent. Migrates old
@@ -250,6 +311,60 @@ export async function setViewpointStatus(
 }
 
 /* ------------------------------------------------------------------ *
+ * 知识库摘要缓存（C2）：<meetingDir>/kb-digest.json
+ * 独立文件（沿用 review.json 的同级惯例），避免 meeting.json 竞态。
+ * ------------------------------------------------------------------ */
+
+/** Structural guard: only well-formed entries survive a hand-edited cache file. */
+function isKbDigestEntry(value: unknown): value is KbDigestEntry {
+  if (value === null || typeof value !== 'object') return false
+  const entry = value as Partial<KbDigestEntry>
+  return typeof entry.path === 'string' && entry.path !== ''
+    && typeof entry.size === 'number'
+    && typeof entry.mtimeMs === 'number'
+    && typeof entry.digest === 'string'
+    && typeof entry.ts === 'number'
+}
+
+/** Read the knowledge-base digest cache.
+ *
+ *  A missing OR corrupt file reads as empty: a bad cache must never block a
+ *  meeting — the worst case is that the captain re-reads a file, which is
+ *  exactly the behaviour that existed before the cache. */
+export async function readKbDigest(stateRoot: string, meetingId: string): Promise<KbDigestFile> {
+  const empty: KbDigestFile = { meetingId, entries: [], updatedAt: 0 }
+  let raw: string
+  try {
+    raw = await readFile(join(meetingDirOf(stateRoot, meetingId), 'kb-digest.json'), 'utf8')
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return empty
+    throw error
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<KbDigestFile>
+    return {
+      meetingId,
+      entries: Array.isArray(parsed.entries) ? parsed.entries.filter(isKbDigestEntry) : [],
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0,
+    }
+  } catch {
+    return empty
+  }
+}
+
+/** Persist the knowledge-base digest cache (atomic). */
+export async function writeKbDigest(
+  stateRoot: string,
+  meetingId: string,
+  entries: readonly KbDigestEntry[],
+): Promise<void> {
+  const dir = meetingDirOf(stateRoot, meetingId)
+  await mkdir(dir, { recursive: true })
+  const file: KbDigestFile = { meetingId, entries: [...entries], updatedAt: Date.now() }
+  await writeJsonAtomic(join(dir, 'kb-digest.json'), file)
+}
+
+/* ------------------------------------------------------------------ *
  * 工作区级匿名反馈（E1/E3）：feedback.jsonl 放在 stateRoot 下（跨会议聚合）。
  * 只记录结构化使用事实 + 用户主动填写的一句说明，绝不记录对话内容。
  * ------------------------------------------------------------------ */
@@ -284,13 +399,16 @@ export async function readFeedback(stateRoot: string): Promise<FeedbackEntry[]> 
 export async function clearFeedbackForMeeting(stateRoot: string, meetingId: string): Promise<number> {
   const before = await readFeedback(stateRoot)
   const remaining = before.filter((entry) => entry.meetingId !== meetingId)
-  await writeFile(join(stateRoot, 'feedback.jsonl'), remaining.map((entry) => JSON.stringify(entry)).join('\n') + (remaining.length > 0 ? '\n' : ''), 'utf8')
+  await writeTextAtomic(
+    join(stateRoot, 'feedback.jsonl'),
+    remaining.map((entry) => JSON.stringify(entry)).join('\n') + (remaining.length > 0 ? '\n' : ''),
+  )
   return before.length - remaining.length
 }
 
 /** Remove every feedback entry; returns how many were dropped. */
 export async function clearFeedback(stateRoot: string): Promise<number> {
   const before = await readFeedback(stateRoot)
-  await writeFile(join(stateRoot, 'feedback.jsonl'), '', 'utf8')
+  await writeTextAtomic(join(stateRoot, 'feedback.jsonl'), '')
   return before.length
 }

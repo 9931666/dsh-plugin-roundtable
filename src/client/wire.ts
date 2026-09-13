@@ -4,10 +4,42 @@
  * @module dsh-plugin-roundtable/client/wire
  */
 
-import type { RpcResult } from '@deepseek-ai/dsh-client-connection/client'
+/** One RPC response envelope (structurally compatible with the host's RpcResult). */
+export type RpcEnvelope<T> =
+  | { ok: true; value: T; error?: never }
+  | { ok: false; error: { code: string; message: string; details?: unknown }; value?: never }
 
-/** A tiny typed RPC caller over the host `/api` channel. */
-export type RpcCaller = <T>(endpoint: string, payload: unknown) => Promise<RpcResult<T>>
+/** A tiny typed RPC caller over the plugin's own web route. */
+export type RpcCaller = <T>(endpoint: string, payload: unknown) => Promise<RpcEnvelope<T>>
+
+/**
+ * POST one RPC call to the plugin's OWN web route.
+ *
+ * That route is mounted through the same `webServer` registration as the
+ * snapshot route, so the browser reaches it even when the host's generic
+ * connection channel is not mounted — which is what made the settings page
+ * report 「读取设置失败」. An unreachable or malformed answer is reported as a
+ * failure envelope instead of a rejected promise.
+ */
+export async function callRpc<T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<RpcEnvelope<T>> {
+  try {
+    const response = await fetch('/plugins/dsh-plugin-roundtable/rpc', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint, payload }),
+      cache: 'no-store',
+      ...(signal === undefined ? {} : { signal }),
+    })
+    const body = await response.json() as unknown
+    const envelope = body as RpcEnvelope<T> | null
+    if (envelope === null || typeof envelope !== 'object' || typeof envelope.ok !== 'boolean') {
+      return { ok: false, error: { code: 'internal', message: `roundtable rpc route returned ${response.status}` } }
+    }
+    return envelope
+  } catch (error: unknown) {
+    return { ok: false, error: { code: 'internal', message: error instanceof Error ? error.message : String(error) } }
+  }
+}
 
 export interface WireNode {
   id: string
@@ -161,6 +193,10 @@ export interface WireMeeting {
   captainSessionId: string
   /** 知识库目录（阅览版）；空 = 未设置。 */
   kbPath: string
+  /** R2：本次会议选中的 skill 名称清单；空 = 未选。 */
+  skills: string[]
+  /** R2.2/D5：skill 传递方式（relay / direct）。 */
+  skillDelivery: string
   budget: WireBudget
   nodes: WireNode[]
   edges: WireEdge[]
@@ -170,6 +206,18 @@ export interface WireMeeting {
   digest: string
   messages: WireMessage[]
   recent: WireUtterance[]
+}
+
+/** B3 用户自建角色预设（设置页维护；专家管理面板一键填充）。
+ *  与 host `types.ts` 的 `RolePreset` 逐字对应。 */
+export interface WireRolePreset {
+  id: string
+  name: string
+  role: string
+  /** 可选 provider 路由；必须与 model 同时存在才生效。 */
+  provider?: string
+  /** 可选模型名；空 = 继承主持人。 */
+  model?: string
 }
 
 export interface RoundTablePrefs {
@@ -184,6 +232,12 @@ export interface RoundTablePrefs {
   expertMaxOpinions: number
   /** E1/E4 反馈：会议结束后是否询问轻量反馈；false = 永久关闭。 */
   feedbackEnabled: boolean
+  /** R2.2/D5：skill 传递方式（relay=主持人中转；direct=专家自行调用）。 */
+  skillDelivery: 'relay' | 'direct'
+  /** R3：右栏隐藏的面板 id 清单；空 = 全部显示。 */
+  hiddenPanels: string[]
+  /** B3：用户自建角色预设（全局；不预置内置角色）。 */
+  rolePresets: WireRolePreset[]
 }
 
 /**

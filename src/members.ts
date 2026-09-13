@@ -11,11 +11,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
-import type { Meeting, MeetingNode } from './types.ts'
+import type { Meeting, MeetingNode, SkillDelivery } from './types.ts'
 import { ACTIVE_NODE_STATUSES, CAPTAIN_KEY } from './types.ts'
 
 /** Runtime knobs for node spawning, resolved from plugin config. */
@@ -32,6 +32,7 @@ const NODE_LABEL_PREFIX = 'roundtable:'
 /** Captain-only RoundTable tools hidden from expert nodes. */
 const NODE_DENIED_TOOLS: readonly string[] = [
   'roundtable_create',
+  'roundtable_plan_meeting',
   'roundtable_add_node',
   'roundtable_remove_node',
   'roundtable_connect',
@@ -39,10 +40,63 @@ const NODE_DENIED_TOOLS: readonly string[] = [
   'roundtable_request_decision',
   'roundtable_set_budget',
   'roundtable_close',
+  'roundtable_collect_review',
+  'roundtable_finish_review',
+  'roundtable_export_review',
+  'roundtable_export_meeting',
+  'roundtable_kb_digest',
 ]
 
-/** The node's tool restriction (deny captain-only tools). */
-export function nodeToolRestriction(): ToolRestriction {
+/**
+ * 专家节点在 direct 模式下可以保留的工具白名单。
+ *
+ * `allow` 的语义是"只有列出的全局工具保持可见"，因此这里必须列全专家
+ * 真正需要的工具（文件/搜索/shell/技能/协作/自身管理）；一旦宿主改名，
+ * 专家会失去该能力但**不会**因此获得额外权限 —— 这是刻意选择的失败方向。
+ * `deny` 仍然保留（两者是与关系）：它保证将来有人从本清单里删掉某项时，
+ * 主持人专属工具不会顺带被放开。
+ */
+const NODE_ALLOWED_TOOLS: readonly string[] = [
+  // 只读本地信息 + 写自己的产出
+  'read',
+  'read_image',
+  'write',
+  'edit',
+  'str_replace_editor',
+  'glob',
+  'grep',
+  'pwsh',
+  'bash',
+  'todo_write',
+  'web_search',
+  'web_fetch',
+  // 会话自身管理（maxDepth=1 限制专家不得再开团队）
+  'send_message',
+  'interrupt_agent',
+  'list_agents',
+  'list_subagent_models',
+  'job_list',
+  'job_output',
+  'job_kill',
+  // 协作通道（与主持人共享）
+  'roundtable_speak',
+  'roundtable_send_message',
+  'roundtable_summarize',
+  'roundtable_status',
+  'roundtable_actions_clear',
+  'roundtable_start_review',
+  'roundtable_proxy_think',
+  // R2.3：direct 模式下专家自行加载 skill
+  'skill',
+]
+
+/** The node's tool restriction: deny captain-only tools, and — in direct
+ *  skill-delivery mode — narrow the surface to the explicit expert allowlist
+ *  so the host's `skill` loader is reachable from a node. */
+export function nodeToolRestriction(skillDelivery: SkillDelivery = 'relay'): ToolRestriction {
+  if (skillDelivery === 'direct') {
+    return { allow: [...NODE_ALLOWED_TOOLS], deny: [...NODE_DENIED_TOOLS] }
+  }
   return { deny: [...NODE_DENIED_TOOLS] }
 }
 
@@ -54,12 +108,49 @@ export interface ExpertLimits {
   maxOpinions?: number
 }
 
+/** 节点 persona 需要的 skill 上下文（R2：会议选中的 skill 与传递方式）。 */
+export interface NodeSkillContext {
+  /** 选择随 persona 注入的 skill 名称（缺省取 meeting.skills）。 */
+  names?: readonly string[]
+  /** 缺省取 meeting.skillDelivery。 */
+  delivery?: SkillDelivery
+  /** host 是否真的注册了 `skill` 工具（未注册时不得让专家去调它）。 */
+  skillToolAvailable?: boolean
+}
+
+/**
+ * skill 段落：把"选了哪些 skill / 用哪种方式"写进 persona。
+ *
+ * direct 模式下这是**必须**的：`skill` 工具本身不带白名单参数，专家只有
+ * 在 persona 里被告知可用清单，才知道能调什么（R2.3）。
+ */
+function skillSection(meeting: Meeting, skill: NodeSkillContext): string {
+  const names = (skill.names ?? meeting.skills ?? []).filter((name) => name !== '')
+  const delivery = skill.delivery ?? meeting.skillDelivery ?? 'relay'
+  if (names.length === 0 && delivery !== 'direct') return ''
+  const list = names.length === 0 ? '（本次会议未选中任何 skill）' : names.map((name) => `\`${name}\``).join('、')
+  if (delivery === 'direct') {
+    const usable = names.length > 0 && skill.skillToolAvailable === true
+    return [
+      '',
+      `6. 本次会议选中的 skill：${list}。传递方式为「专家直接调用」：${usable
+        ? '需要 skill 的完整说明时，你自己调用 `skill` 工具（参数 name 传上方清单里的 skill 名）加载全文，然后严格按其约束工作；也可以加载清单之外的其他 skill。'
+        : '当前会话的 `skill` 工具不可用或未选中 skill，请不要尝试调用它，改用你自己的通用能力完成任务。'}`,
+    ].join('\n')
+  }
+  return [
+    '',
+    `6. 本次会议选中的 skill：${list}。传递方式为「主持人中转」：主持人会按需读取 skill 正文并把要点转交给你，你不需要也不应该自己调用 \`skill\` 工具；把这些 skill 的约束当作既定的工作前提。`,
+  ].join('\n')
+}
+
 /** The node's system prompt (persona): the charter plus node working rules. */
 export function nodePersona(
   meeting: Meeting,
   node: MeetingNode,
   stateDir: string,
   limits: ExpertLimits = {},
+  skill: NodeSkillContext = {},
 ): string {
   const modeRule = meeting.mode === 'egalitarian'
     ? `- 协作模式为"多模型平等"：你可以用 roundtable_send_message 直接与任何其他节点（或主持人）交换意见，无需主持人中转。`
@@ -75,8 +166,8 @@ export function nodePersona(
 1. 收到主持人的消息或任务后，完整执行一整轮工作，然后用 roundtable_speak 把你的产出写入会议记录（to 留空表示交给汇聚网关；定向回复某人时填对方节点名）。
 2. 发言遵循总纲第三节的格式：[当前状态] 开头、[核心产出] 与 [下一步建议] 结尾，严禁废话。
 3. 会议状态文件位于 ${stateDir}/${meeting.id}/（meeting.json 与 transcript.jsonl）。你可以只读查看，但严禁直接修改；一切状态变更走 roundtable_* 工具。
-4. 你是专家，不是主持人：不要创建/移除节点、不要修改连线、不要发起人类决策、不要结束会议。
-5. 遇到无法独自决定的分歧，在发言中建议主持人触发 [需人类决策]，严禁替用户拍板。
+4. 你是专家，不是主持人：不要创建/移除节点、不要修改连线、不要发起人类决策、不要结束会议、不要为别人下发会议设置卡片。
+5. 遇到无法独自决定的分歧，在发言中建议主持人触发 [需人类决策]，严禁替用户拍板。${skillSection(meeting, skill)}
 ${modeRule}
 
 回答限制（省 token，务必遵守）：
@@ -104,6 +195,7 @@ export async function spawnNode(
   stateDir: string,
   signal: AbortSignal,
   limits: ExpertLimits = {},
+  skill: NodeSkillContext = {},
 ): Promise<void> {
   const provider = ctx.subagents.getProvider(config.provider)
   if (provider === undefined) {
@@ -125,22 +217,39 @@ export async function spawnNode(
   const label = `${NODE_LABEL_PREFIX}${meeting.id}:${node.key}`
   // Per-request output cap: model max_tokens applied to every conversation
   // request the node makes (0/unset = the provider's own default).
-  const agentOptions: { provider?: string; model?: string; maxTokens?: number } = {}
+  const agentOptions: {
+    provider?: string
+    model?: string
+    reasoningEffort?: ReasoningEffortId
+    maxTokens?: number
+  } = {}
   if (node.provider !== undefined && node.model !== undefined) {
     agentOptions.provider = node.provider
     agentOptions.model = node.model
   }
+  // Reasoning effort is an adapter-owned OPAQUE id: this plugin stores and
+  // forwards the string, and the selected model's capability decides whether
+  // it means anything. Absent = the child inherits the captain's
+  // route-owned effort (see @deepseek-ai/dsh-subagent resolveChildAgentOptions).
+  const reasoningEffort = node.reasoningEffort?.trim() ?? ''
+  if (reasoningEffort !== '') {
+    agentOptions.reasoningEffort = ReasoningEffortId(reasoningEffort)
+  }
   if (limits.maxTokens !== undefined && limits.maxTokens > 0) {
     agentOptions.maxTokens = limits.maxTokens
   }
+  const delivery = skill.delivery ?? meeting.skillDelivery ?? 'relay'
+  // The `skill` tool is only reachable when the host actually registered it in
+  // this agent's surface — never tell a node to call a loader it cannot see.
+  const skillToolAvailable = ctx.tools.get('skill', captain) !== undefined
   const started = await ctx.subagents.startContinuable({
     provider: config.provider,
     label,
     request: {
       prompt: [{ type: 'text', text: nodeWelcome(meeting, node) }] as ContentBlock[],
       parent: captain,
-      persona: nodePersona(meeting, node, stateDir, limits),
-      toolFilter: nodeToolRestriction(),
+      persona: nodePersona(meeting, node, stateDir, limits, { ...skill, delivery, skillToolAvailable }),
+      toolFilter: nodeToolRestriction(delivery),
       ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
       ...(config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {}),
     },

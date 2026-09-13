@@ -1158,7 +1158,21 @@
   color: #4d6bfe;
 }
 
+/* ---------- 右栏面板可见性（R3：设置页点圆圈决定显示） ---------- */
+
+/* 被用户关掉的面板不渲染（右栏因此变短，拓扑区自然变大）。 */
+.panelHidden {
+  display: none !important;
+}
+
 /* ---------- knowledge base (阅览版) ---------- */
+
+/* skill 传递方式的简短标注（与面板标题同一行，保持界面工整）。 */
+.skillDeliveryLabel {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  font-weight: 400;
+}
 
 .kbPathRow {
   font-size: 11px;
