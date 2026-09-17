@@ -48,6 +48,30 @@ test('卡片逐个列出专家（序号 + key + 角色 + 路由）', () => {
   assert.ok(card.includes('2. `reviewer` — 审查 — 继承主持人当前 provider/model'))
 })
 
+// R-A：预设引用必须在卡片上**可分辨**。此前预设只被浏览器表单消费，
+// 主持人拿不到 rolePresets，于是「以为用了预设」与「其实没用」在卡片上无法区分。
+test('卡片标注专家来自哪条预设，便于确认草案与实际建节点同源', () => {
+  const card = formatMeetingDraft(DRAFT, [
+    { key: 'arch', role: '架构主审', provider: 'dshapi', model: 'deepseek-v4.1-flash', preset: 'arch' },
+  ])
+  assert.ok(card.includes('来自预设 `arch`'), '卡片应标出预设来源')
+})
+
+test('预设引用解析失败时卡片显式告警，不静默降级', () => {
+  const card = formatMeetingDraft(DRAFT, [
+    { key: 'arch', role: '架构主审', unresolved: 'no-such-preset' },
+  ])
+  assert.ok(card.includes('未找到'), '未解析的预设必须显式告警')
+  assert.ok(card.includes('no-such-preset'), '告警里应带原始引用名')
+  assert.ok(card.includes('roundtable_list_presets'), '应给出查 id 的入口')
+})
+
+test('未引用预设的专家不出现预设标记（避免误报来源）', () => {
+  const card = formatMeetingDraft(DRAFT, EXPERTS)
+  assert.ok(!card.includes('来自预设'))
+  assert.ok(!card.includes('未找到'))
+})
+
 test('空专家名单给出可操作提示，而不是留白', () => {
   assert.ok(formatMeetingDraft(DRAFT, []).includes('建议至少 1 位'))
 })
