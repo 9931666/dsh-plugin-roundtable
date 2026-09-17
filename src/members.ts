@@ -92,12 +92,23 @@ const NODE_ALLOWED_TOOLS: readonly string[] = [
 
 /** The node's tool restriction: deny captain-only tools, and — in direct
  *  skill-delivery mode — narrow the surface to the explicit expert allowlist
- *  so the host's `skill` loader is reachable from a node. */
-export function nodeToolRestriction(skillDelivery: SkillDelivery = 'relay'): ToolRestriction {
+ *  so the host's `skill` loader is reachable from a node.
+ *
+ *  ⚠ `ToolRuntime.restrict()` throws on names the host has not registered, and
+ *  tool names are host-owned (a composition without `bash`/`str_replace_editor`
+ *  is normal). The allowlist above is therefore a HOST-AGNOSTIC WISH LIST: pass
+ *  `isRegistered` to drop the entries this host does not actually expose, or
+ *  node spawn fails outright with "unknown global tools". */
+export function nodeToolRestriction(
+  skillDelivery: SkillDelivery = 'relay',
+  isRegistered?: (name: string) => boolean,
+): ToolRestriction {
+  const known = (names: readonly string[]): string[] =>
+    isRegistered === undefined ? [...names] : names.filter((name) => isRegistered(name))
   if (skillDelivery === 'direct') {
-    return { allow: [...NODE_ALLOWED_TOOLS], deny: [...NODE_DENIED_TOOLS] }
+    return { allow: known(NODE_ALLOWED_TOOLS), deny: known(NODE_DENIED_TOOLS) }
   }
-  return { deny: [...NODE_DENIED_TOOLS] }
+  return { deny: known(NODE_DENIED_TOOLS) }
 }
 
 /** Per-expert answer limits resolved from settings at spawn time. */
@@ -242,6 +253,11 @@ export async function spawnNode(
   // The `skill` tool is only reachable when the host actually registered it in
   // this agent's surface — never tell a node to call a loader it cannot see.
   const skillToolAvailable = ctx.tools.get('skill', captain) !== undefined
+  // Tool names are host-owned: filtering the wish list against the live
+  // registry keeps node spawn working on compositions that lack bash / a
+  // str_replace_editor alias / the subagent-model lister (restrict() throws
+  // "unknown global tools" for any name the host never registered).
+  const isRegistered = (name: string): boolean => ctx.tools.get(name, captain) !== undefined
   const started = await ctx.subagents.startContinuable({
     provider: config.provider,
     label,
@@ -249,7 +265,7 @@ export async function spawnNode(
       prompt: [{ type: 'text', text: nodeWelcome(meeting, node) }] as ContentBlock[],
       parent: captain,
       persona: nodePersona(meeting, node, stateDir, limits, { ...skill, delivery, skillToolAvailable }),
-      toolFilter: nodeToolRestriction(delivery),
+      toolFilter: nodeToolRestriction(delivery, isRegistered),
       ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
       ...(config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {}),
     },
