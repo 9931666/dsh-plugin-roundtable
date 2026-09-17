@@ -76,7 +76,7 @@ export interface SkillListEntry {
  */
 export function formatMeetingDraft(
   draft: MeetingDraft,
-  experts: readonly { key: string; role?: string; provider?: string; model?: string }[],
+  experts: readonly { key: string; role?: string; provider?: string; model?: string; preset?: string; unresolved?: string }[],
   options: { revised?: boolean; availableSkills?: readonly SkillListEntry[] } = {},
 ): string {
   const modeLabel = draft.mode === 'orchestrated'
@@ -91,7 +91,14 @@ export function formatMeetingDraft(
         const route = expert.provider !== undefined && expert.provider !== '' && expert.model !== undefined && expert.model !== ''
           ? `${expert.provider}/${expert.model}`
           : '继承主持人当前 provider/model'
-        return `${index + 1}. \`${expert.key}\` — ${role} — ${route}`
+        // R-A：卡片须让人看出这条专家是「用户预设」还是「主持人临时写的角色」，
+        // 以及预设引用是否解析成功——引用失败不静默。
+        const origin = expert.unresolved !== undefined
+          ? `  ⚠ 预设 \`${expert.unresolved}\` 未找到（将按临时角色走；可用 roundtable_list_presets 查 id）`
+          : expert.preset !== undefined
+            ? `  ← 来自预设 \`${expert.preset}\``
+            : ''
+        return `${index + 1}. \`${expert.key}\` — ${role} — ${route}${origin}`
       }).join('\n')
   const skills = draft.skills.length === 0
     ? '（未选）'

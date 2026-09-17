@@ -73,6 +73,39 @@ export interface ToolsConfig {
   getPlannedDefaults?: () => PlannedDefaults
   /** 观点拆分 LLM 路由（V0.2.2）：collect_review 时把发言拆成独立观点。 */
   reviewSplit?: { provider: string; model: string; maxOpinions: number }
+  /** R-A 修复：读取用户自建角色预设（实时）。缺省 = 无预设可用。 */
+  getRolePresets?: () => readonly RolePresetLike[]
+}
+
+/**
+ * 角色预设的最小结构（供本文件内消费）。
+ *
+ * 完整校验在 `rpc.ts` 的 `sanitizeRolePresets`（条目级：name/role 非空、
+ * provider/model 成对、长度截断）。这里只做**读取侧**的宽松形状，不重复校验，
+ * 避免两处规则漂移。
+ */
+export interface RolePresetLike {
+  id: string
+  name: string
+  role: string
+  provider?: string
+  model?: string
+}
+
+/**
+ * 按 id 或显示名解析一条预设；精确匹配 id 优先，其次 name。
+ *
+ * 导出仅为可测（`test/preset-binding.test.mjs`）；它不读写会议状态，
+ * 是纯粹的名字→预设映射。
+ */
+export function resolvePreset(
+  presets: readonly RolePresetLike[],
+  ref: string,
+): RolePresetLike | undefined {
+  const key = ref.trim()
+  if (key === '') return undefined
+  return presets.find((preset) => preset.id === key)
+    ?? presets.find((preset) => preset.name === key)
 }
 
 /** Resolved defaults for one meeting's settings card (R1). */
@@ -438,7 +471,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           additionalProperties: false,
           properties: {
             key: { type: 'string', required: true, description: '专家唯一标识，如 researcher。' },
-            role: { type: 'string', description: '角色说明，如 安全审查。' },
+            role: { type: 'string', description: '角色说明，如 安全审查。传了 preset 且解析成功时，此字段可省略。' },
+            preset: { type: 'string', description: '可选：用户自建角色预设的 id 或名称（见 roundtable_list_presets）。卡片会显示该预设解析后的 role 与路由。' },
             provider: { type: 'string', description: '模型路由（与 model 同时给出才生效；缺省继承主持人当前路由）。' },
             model: { type: 'string', description: '模型名。' },
           },
@@ -487,14 +521,36 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const skills = normalizeSkillNames(args.skills)
       const experts = Array.isArray(args.experts)
         ? (args.experts as unknown[]).flatMap((raw) => {
-            const entry = raw as { key?: unknown; role?: unknown; provider?: unknown; model?: unknown }
+            const entry = raw as { key?: unknown; role?: unknown; preset?: unknown; provider?: unknown; model?: unknown }
             const key = String(entry?.key ?? '').trim()
             if (key === '') return []
+            // R-A：卡片必须显示**解析后**的 role/路由，否则用户确认的是一份与
+            // 实际建节点不同的草案（本次自审抓到的假绿同型问题）。
+            // 解析失败不静默：卡片上显式标注 unresolved，交由用户与主持人看见。
+            const presetRef = entry?.preset === undefined ? '' : String(entry.preset).trim()
+            let preset: RolePresetLike | undefined
+            let unresolved = ''
+            if (presetRef !== '') {
+              const available = config.getRolePresets?.() ?? []
+              preset = resolvePreset(available, presetRef)
+              if (preset === undefined) unresolved = presetRef
+            }
+            const role = entry?.role !== undefined
+              ? String(entry.role)
+              : preset?.role
+            const provider = entry?.provider !== undefined
+              ? String(entry.provider)
+              : (preset?.provider !== undefined && preset.model !== undefined ? preset.provider : undefined)
+            const model = entry?.model !== undefined
+              ? String(entry.model)
+              : (preset?.provider !== undefined && preset.model !== undefined ? preset.model : undefined)
             return [{
               key,
-              role: entry?.role === undefined ? undefined : String(entry.role),
-              provider: entry?.provider === undefined ? undefined : String(entry.provider),
-              model: entry?.model === undefined ? undefined : String(entry.model),
+              role,
+              provider,
+              model,
+              preset: presetRef === '' ? undefined : presetRef,
+              unresolved: unresolved === '' ? undefined : unresolved,
             }]
           })
         : []
@@ -583,10 +639,11 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'roundtable_add_node',
-    description: 'Add an expert node to your meeting: spawns a durable continuable subagent with the meeting charter as its persona. By default the node inherits your current provider/model. Supply provider/model only when the user explicitly wants a different route for this expert.',
+    description: 'Add an expert node to your meeting: spawns a durable continuable subagent with the meeting charter as its persona. By default the node inherits your current provider/model. Supply provider/model only when the user explicitly wants a different route for this expert. Pass `preset` to reuse one of the user\'s self-built role presets (see roundtable_list_presets) instead of inventing a role.',
     parameters: {
       name: { type: 'string', required: true, description: 'Unique node key inside the meeting (e.g. researcher, engineer, reviewer).' },
-      role: { type: 'string', description: 'Role description for this expert (e.g. "security reviewer").' },
+      role: { type: 'string', description: 'Role description for this expert (e.g. "security reviewer"). Ignored when `preset` resolves.' },
+      preset: { type: 'string', description: 'Optional role-preset reference (id or exact name, as returned by roundtable_list_presets). When it resolves, the preset\'s role/provider/model fill any field you left unset; explicit `role`/`provider`/`model` still win.' },
       provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model.' },
       model: { type: 'string', description: 'Optional model override. Omit to inherit your current model.' },
       reasoning_effort: { type: 'string', description: 'Optional adapter-owned reasoning-effort id for this expert (e.g. high / medium / low — the exact vocabulary is defined by the model capability, not by this plugin). Omit to inherit your own route-owned effort.' },
@@ -633,12 +690,40 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         // A2/A5: reasoning effort is captured on the node and forwarded by
         // spawnNode; an empty value means "inherit the captain's effort".
         const reasoningEffort = args.reasoning_effort !== undefined ? String(args.reasoning_effort).trim() : ''
+        // R-A：预设引用。解析成功后，预设填充**未显式给出**的字段；显式参数优先。
+        // 解析失败**不静默降级** —— 静默会让「以为用了预设」与「其实没用」不可分辨
+        // （这正是本次自审抓到的假绿形态），所以直接报错并提示可用的 id。
+        const presetRef = args.preset !== undefined ? String(args.preset).trim() : ''
+        let fromPreset: RolePresetLike | undefined
+        if (presetRef !== '') {
+          const available = config.getRolePresets?.() ?? []
+          fromPreset = resolvePreset(available, presetRef)
+          if (fromPreset === undefined) {
+            const hint = available.length === 0
+              ? 'no role presets are defined (设置 → 圆桌会议 → 角色预设)'
+              : `available: ${available.map((preset) => preset.id).join(', ')}`
+            throw new Error(`roundtable: role preset "${presetRef}" not found — ${hint}`)
+          }
+        }
+        const resolvedRole = args.role !== undefined
+          ? String(args.role)
+          : fromPreset?.role
+        const resolvedProvider = args.provider !== undefined
+          ? String(args.provider)
+          : (fromPreset?.provider !== undefined && fromPreset.model !== undefined
+              ? fromPreset.provider
+              : captain.options.provider)
+        const resolvedModel = args.model !== undefined
+          ? String(args.model)
+          : (fromPreset?.provider !== undefined && fromPreset.model !== undefined
+              ? fromPreset.model
+              : captain.options.model)
         const node: MeetingNode = {
           id: '',
           key: nodeKey,
-          role: args.role !== undefined ? String(args.role) : undefined,
-          provider: args.provider !== undefined ? String(args.provider) : captain.options.provider,
-          model: args.model !== undefined ? String(args.model) : captain.options.model,
+          role: resolvedRole,
+          provider: resolvedProvider,
+          model: resolvedModel,
           reasoningEffort: reasoningEffort === '' ? undefined : reasoningEffort,
           status: 'idle',
           joinedAt: Date.now(),
@@ -1526,6 +1611,72 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         await writeMeeting(stateRoot, fresh)
         return { status: fresh.status, max_rounds: fresh.budget.maxRounds, max_tokens: fresh.budget.maxTokens }
       })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'roundtable_list_presets',
+    description: 'List the user\'s self-built role presets (设置 → 圆桌会议 → 角色预设）。读取实时，返回每条预设的 id / name / role / provider / model。用途：在你为会议挑选专家之前拿到**用户真正定义的**角色文本，而不是自己临场编一个 role。拿到后把某条的 role 原样传给 roundtable_add_node（或直接用 preset 参数引用）。返回空列表表示用户尚未建任何预设——此时不要假装有预设可用，改为自行写 role 并说明这是临时角色。',
+    parameters: {
+      filter: { type: 'string', description: '可选：按 id 或名称子串过滤；留空返回全部。' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          total: { type: 'integer', required: true },
+          shown: { type: 'integer', required: true },
+          presets: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string', required: true },
+                name: { type: 'string', required: true },
+                role: { type: 'string', required: true },
+                provider: { type: 'string', required: true },
+                model: { type: 'string', required: true },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => {
+        if (value.total === 0) {
+          return [{ type: 'text', text: 'No role presets defined yet (设置 → 圆桌会议 → 角色预设 is empty). Write the expert role yourself and say it is an ad-hoc role.' }]
+        }
+        const lines = value.presets.map((preset) => {
+          const route = preset.provider === '' || preset.model === ''
+            ? '（继承主持人路由）'
+            : `${preset.provider}/${preset.model}`
+          return `- ${preset.id} | ${preset.name} | ${route}\n  role: ${preset.role}`
+        })
+        return [{
+          type: 'text',
+          text: `${value.shown}/${value.total} role preset(s):\n${lines.join('\n')}`,
+        }]
+      },
+    },
+    async execute(args) {
+      const presets = config.getRolePresets?.() ?? []
+      const filter = typeof args.filter === 'string' ? args.filter.trim() : ''
+      const matched = filter === ''
+        ? presets
+        : presets.filter((preset) => preset.id.includes(filter) || preset.name.includes(filter))
+      return {
+        total: presets.length,
+        shown: matched.length,
+        presets: matched.map((preset) => ({
+          id: preset.id,
+          name: preset.name,
+          role: preset.role,
+          provider: preset.provider ?? '',
+          model: preset.model ?? '',
+        })),
+      }
     },
   }))
 

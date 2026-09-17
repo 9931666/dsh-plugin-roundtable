@@ -94,7 +94,7 @@ function usageSectionText(toolNames: string): string {
   return `When the user asks to run a round-table meeting (圆桌会议) — e.g. "开个圆桌会议讨论 X", "让几个专家辩论 Y", "use RoundTable to decide Z" — you are the captain (主持人) of a multi-expert meeting. Follow this protocol:
 1. NEVER create a meeting straight away. First call roundtable_plan_meeting with the meeting name, the goal, and the experts you intend to use (key/role/provider/model, only pass provider/model when the user explicitly wants a different route for that expert) plus the parameters you derived. It does NOT create anything: it shows the human a readable SETTINGS CARD (roster + mode + budget + knowledge base + selected skills) and blocks until they answer, returning decision="approved" (create with exactly those values) or decision="revise" with the user's own words — update the draft, keep every unchanged field as-is, and call it again (it will show the revised card with revised=true). Always show the card, even for a single expert. If it returns decision="unavailable", state the draft in words, get explicit agreement, then create.
 2. Call roundtable_create only with the confirmed values (name, goal, mode, max_rounds, max_tokens, kb_path, skills, skill_delivery). Default to the user's configured mode (orchestrated unless asked otherwise); for egalitarian mode also bound max_rounds/max_tokens so the debate cannot run away; for "redteam" (针锋相对) the meeting attacks an already-settled plan — experts only find flaws, no alternative proposals.
-3. Call roundtable_add_node once per expert role the goal needs (researcher, engineer, reviewer, ...). Nodes are durable subagents that carry the《全局协作总纲》as their persona. By default a node inherits your current provider/model; pass provider/model only when the user explicitly wants a different route for that expert. Never ask the user to pick per node.
+3. Call roundtable_add_node once per expert role the goal needs (researcher, engineer, reviewer, ...). Nodes are durable subagents that carry the《全局协作总纲》as their persona. R-A: the user maintains self-built role presets (设置 → 圆桌会议 → 角色预设); call roundtable_list_presets FIRST and, when a preset fits, pass its id as \`preset\` to add_node (or reuse its role verbatim) so the meeting runs the text the user actually wrote — do NOT invent a substitute role for a task a preset already covers. If the catalogue is empty, write the role yourself and say it is ad-hoc. By default a node inherits your current provider/model; pass provider/model only when the user explicitly wants a different route for that expert. Never ask the user to pick per node.
 4. Wire the topology with roundtable_connect (forward = pipeline hand-off, bidirectional = debate channel) to reflect the intended collaboration, and drop stale edges with roundtable_disconnect.
 5. Lead by delegation: send tasks and relayed opinions to nodes with roundtable_send_message, monitor with roundtable_status, and pull the aggregation gateway digest with roundtable_summarize. Do not duplicate a node's work merely because its turn is slow. In orchestrated mode you relay everything; in egalitarian mode nodes debate each other directly and you only referee (watch the budget).
 6. When experts disagree or a decision needs the user, call roundtable_request_decision with the question and option labels (the meeting pauses until the human answers). Never decide on the user's behalf.
@@ -143,6 +143,7 @@ export function apply(ctx: Context, config: Config): void {
     'roundtable_create',
     'roundtable_add_node',
     'roundtable_remove_node',
+    'roundtable_list_presets',
     'roundtable_connect',
     'roundtable_disconnect',
     'roundtable_speak',
@@ -213,6 +214,9 @@ export function apply(ctx: Context, config: Config): void {
     },
     // R2.2/D5：skill 传递方式的默认值，读设置页（实时）。
     getSkillDelivery: () => (runtime.scope?.get() ?? runtime.fallbackPrefs).skillDelivery ?? 'relay',
+    // R-A 修复：把用户自建角色预设暴露给工具层（实时读取）。
+    // 此前预设只被浏览器表单消费，agent 侧拿不到 —— 主持人结构上无法「按预设建节点」。
+    getRolePresets: () => (runtime.scope?.get() ?? runtime.fallbackPrefs).rolePresets ?? [],
     // R1 第 3 条：卡片默认值的设置页那一层。
     getPlannedDefaults: () => {
       const prefs = runtime.scope?.get() ?? runtime.fallbackPrefs
