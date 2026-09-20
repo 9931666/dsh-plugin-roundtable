@@ -10,10 +10,10 @@
  */
 
 /** 当前插件版本（必须与 package.json 的 version 逐字一致）。 */
-export const PLUGIN_VERSION = '0.2.35'
+export const PLUGIN_VERSION = '0.2.36'
 
 /** 导出物头部使用的插件标识行。 */
 export const PLUGIN_ID = `@huanlin/dsh-plugin-roundtable v${PLUGIN_VERSION}`
 
 /** DeepSeek Harness 版本区间（导出头部展示用）。 */
-export const HARNESS_RANGE = 'DeepSeek Harness 0.1.5-rc.1+'
+export const HARNESS_RANGE = 'DeepSeek Harness 0.1.5-rc.2+'

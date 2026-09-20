@@ -40,6 +40,8 @@ export type RoundTableKey =
   | 'settingsLoadFailed'
   | 'settingsSaveFailed'
   | 'fetchFailed'
+  | 'renderFailed'
+  | 'renderFailedHint'
   | 'meetingSelect'
   | 'agents'
   | 'tasks'
@@ -232,6 +234,8 @@ export const zh: Record<RoundTableKey, string> = {
   settingsLoadFailed: '读取设置失败',
   settingsSaveFailed: '保存设置失败',
   fetchFailed: '拉取会议状态失败，正在重试…',
+  renderFailed: '面板渲染失败（插件界面报错）',
+  renderFailedHint: '上面这条报错就是原因。请连同操作步骤反馈给插件作者；切换到别的页签不受影响，控制台（F12）里有完整堆栈。',
   meetingSelect: '切换会议',
   agents: '专家',
   tasks: '分工',
@@ -418,6 +422,8 @@ export const en: Record<RoundTableKey, string> = {
   settingsLoadFailed: 'Failed to load preferences',
   settingsSaveFailed: 'Failed to save preferences',
   fetchFailed: 'Failed to fetch meeting state, retrying…',
+  renderFailed: 'Panel failed to render (plugin UI error)',
+  renderFailedHint: 'The error above is the cause. Please report it with the steps you took; switching to another tab still works, and the console (F12) holds the full stack.',
   meetingSelect: 'Switch meeting',
   agents: 'Agents',
   tasks: 'Tasks',

@@ -31,7 +31,26 @@ import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 export const name = 'roundtable'
-export const inject = ['tools', 'subagents', 'agents', 'systemPrompt', 'userQuestions', 'skills']
+
+/**
+ * REQUIRED services only — and the list is load-gating, which is why it is
+ * short. cordis has no "optional inject" form (`Inject` is `string[] | Record`
+ * and the record form is only intercept config), so every name listed here
+ * keeps the whole plugin fiber PENDING until that service exists: no
+ * `roundtable_*` tools, no `/plugins/dsh-plugin-roundtable/*` routes and no GUI
+ * tab. A missing OPTIONAL capability listed here therefore presents to the user
+ * as "圆桌会议整个不见了 / 无法调用界面" with no error anywhere.
+ *
+ * `userQuestions` and `skills` are deliberately NOT listed: both are optional
+ * capabilities that the plugin reads live through `ctx.get(...)`:
+ *   - skills.ts hard constraint #1 — the plugin MUST load in a profile without
+ *     the skill service and degrade to an empty catalog;
+ *   - tools.ts falls back to `decision: 'unavailable'` when the userQuestions
+ *     service is absent (the captain then states the draft in words).
+ * v0.2.36 removed both from this list; v0.2.21 had already fixed the mirrored
+ * over-constraint on the browser half (`connection`).
+ */
+export const inject = ['tools', 'subagents', 'agents', 'systemPrompt']
 
 /** Plugin configuration. */
 export interface Config {

@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
-  <img src="https://img.shields.io/badge/version-v0.2.35-blue" alt="v0.2.35">
+  <img src="https://img.shields.io/badge/version-v0.2.36-blue" alt="v0.2.36">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
 
@@ -71,6 +71,13 @@
 | **版本号单一来源** | 导出头部统一读 `src/version.ts` 的 `PLUGIN_VERSION`——此前评审导出头部硬编码的 `v0.2.21` 已经写进过交付物；`test/version.test.mjs` 会在它与 `package.json` 不一致时直接失败。 |
 | **统一原子写** | `user-actions.jsonl` / `feedback.jsonl` 的写入与清空改走同一套"同目录 tmp + rename"原子写，并与 UI 追加共用一把串行锁；清空时若发现坏行会**返回 `malformed` 计数**，主持人必须如实告知用户，不再静默丢操作。 |
 
+### 界面可靠性修复（v0.2.36）
+| 修复 | 说明 |
+| --- | --- |
+| **页签/设置页不再整体消失** | 插件曾把**可选**能力写进 cordis 的 `inject`——而 `inject` 是加载门禁（没有"可选注入"这种形式），缺一个服务就整个插件不加载：工具、数据路由、GUI 页签、设置页一起消失且**不报错**。现已收敛为真正必需的服务，可选能力（skill 目录、用户问答、connection 兜底传输）改为运行时 `ctx.get(...)` 可选读取。**宿主侧改动需重启 DSH 生效。** |
+| **崩溃不再无声无息** | DSH 会静默摘掉渲染抛错的 slot 条目（隔离正确，但用户只看到"页签不见了"）。两个界面入口现在都包在错误边界里：崩溃渲染成可读报错面板 + 控制台完整堆栈，可直接贴 issue。**客户端改动刷新页面即生效。** |
+| **防回归闸门** | `test/inject.test.mjs` 直接对**构建产物**断言上述两条不变量（含"没有 connection 服务时仍必须注册两个入口"），旧产物必然失败。 |
+
 ### 界面操作
 | 能力 | 说明 |
 | --- | --- |
@@ -84,7 +91,7 @@
 ## 安装（一分钟）
 
 > [!NOTE]
-> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.1.5-rc.1+**；v0.2.31 起按 0.1.5-rc.1 宿主复核（对应 `@deepseek-ai/*` 0.1.5-rc.2 包），v0.2.1 起即适配 Cordis 4.0.2 / dsh 客户端架构，不再兼容 0.1.1-rc.2）。
+> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.1.5-rc.2+**；v0.2.36 按 0.1.5-rc.2 宿主复核（对应 `@deepseek-ai/*` 0.1.5-rc.2 包），v0.2.31 起按 0.1.5-rc.1 复核，v0.2.1 起即适配 Cordis 4.0.2 / dsh 客户端架构，不再兼容 0.1.1-rc.2）。宿主 `alpha` 线的 0.1.6-alpha.2 尚未适配。
 
 **最快（npm，需要已 `npm login`）**：
 

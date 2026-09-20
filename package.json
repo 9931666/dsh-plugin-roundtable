@@ -1,6 +1,6 @@
 {
   "name": "@huanlin/dsh-plugin-roundtable",
-  "version": "0.2.35",
+  "version": "0.2.36",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

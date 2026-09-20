@@ -20,15 +20,19 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { RoundTableView, type RoundTableViewInjected } from './RoundTableView.tsx'
 import { RoundTableSettings, type RoundTableSettingsInjected } from './RoundTableSettings.tsx'
+import { withSlotBoundary } from './slot-boundary.tsx'
 import { en, NS, zh } from './locales.ts'
 import { callRpc, type RpcCaller, type RpcEnvelope } from './wire.ts'
 
 /**
- * Required services: view/settings slots and locale. `connection` is kept in
- * the inject list as an OPTIONAL fallback (RPC prefers the plugin's own web
- * route), so a composition without that service still loads.
+ * Required services: the two slots registries plus locale. `connection` is NOT
+ * listed — cordis `inject` is load-gating (a name here keeps the whole client
+ * plugin PENDING until that service exists), so listing the OPTIONAL fallback
+ * transport meant a composition without it silently registered neither the
+ * 圆桌会议 tab nor the settings page. It is read live via `ctx.get('connection')`
+ * instead, which is what the RPC fallback below actually needs.
  */
-export const inject = ['slots', 'locale', 'connection']
+export const inject = ['slots', 'locale']
 
 /** Client connection shape: generic RPC caller over the host `/api` channel. */
 interface ConnectionHandle {
@@ -51,7 +55,12 @@ export function apply(ctx: Context): void {
   // `ctx.slots` is the host's real SlotRegistry face (see ui-slots-anchor.d.ts).
   const slots: Slots = ctx.slots
 
-  const connection = (ctx as unknown as { connection?: ConnectionHandle }).connection
+  // Optional transport: read lazily so this plugin loads whether or not the
+  // host's generic connection channel is mounted in the current profile.
+  // `ctx.get` is core cordis (non-strict: `undefined` when unavailable) but the
+  // consumer build's Context type drops it, hence the structural read.
+  const connection = (ctx as unknown as { get?: (name: string) => unknown })
+    .get?.('connection') as ConnectionHandle | undefined
   // Preferred transport: the plugin's own web route (same registration as the
   // snapshot route). The host connection channel stays as a fallback for older
   // or non-web profiles, so an unreachable route degrades instead of breaking.
@@ -70,6 +79,9 @@ export function apply(ctx: Context): void {
     rpc,
     t: ctx.locale.bind(NS) as (key: string) => string,
   })
+  // Both entries are wrapped in a render-failure boundary: DSH retires a slot
+  // entry that throws, which used to make a plugin bug look like "这个 Tab 根本
+  // 不存在" with no message. See slot-boundary.tsx.
   slots.inject('conversation.view', () => slots.register({
     name: 'conversation.view',
     id: 'roundtable',
@@ -77,7 +89,7 @@ export function apply(ctx: Context): void {
     label: () => ctx.locale.bind(NS)('tab'),
     locale: NS,
     inject: viewInjected,
-  }, RoundTableView))
+  }, withSlotBoundary(RoundTableView)))
 
   // ---- Settings page (settings.section) --------------------------------
   const settingsInjected = (): RoundTableSettingsInjected => ({
@@ -91,5 +103,5 @@ export function apply(ctx: Context): void {
     label: () => ctx.locale.bind(NS)('settingsNav'),
     locale: NS,
     inject: settingsInjected,
-  }, RoundTableSettings))
+  }, withSlotBoundary(RoundTableSettings)))
 }
