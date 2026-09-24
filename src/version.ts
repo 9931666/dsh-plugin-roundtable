@@ -10,10 +10,14 @@
  */
 
 /** 当前插件版本（必须与 package.json 的 version 逐字一致）。 */
-export const PLUGIN_VERSION = '0.2.36'
+export const PLUGIN_VERSION = '1.0.0-rc.1'
 
 /** 导出物头部使用的插件标识行。 */
 export const PLUGIN_ID = `@huanlin/dsh-plugin-roundtable v${PLUGIN_VERSION}`
 
-/** DeepSeek Harness 版本区间（导出头部展示用）。 */
-export const HARNESS_RANGE = 'DeepSeek Harness 0.1.5-rc.2+'
+/** DeepSeek Harness 版本区间（导出头部展示用）。
+ *
+ *  必须与 `compatibility.json` 的 `recommendedHost` 一致 —— 由
+ *  `test/compatibility.test.mjs` 强制，`scripts/compatibility.mjs` 参与发布门禁。
+ *  此前这里是硬编码字符串，与 devDependencies 一起漂到了 rc.2 而无人发现。 */
+export const HARNESS_RANGE = 'DeepSeek Harness 0.1.5-rc.3+'

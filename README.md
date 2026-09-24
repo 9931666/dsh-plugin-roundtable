@@ -5,7 +5,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
-  <img src="https://img.shields.io/badge/version-v0.2.36-blue" alt="v0.2.36">
+  <img src="https://img.shields.io/badge/version-v1.0.0--rc.1-blue" alt="v1.0.0-rc.1">
+  <img src="https://img.shields.io/badge/host-0.1.5--rc.3-202724" alt="Harness 0.1.5-rc.3">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
 
@@ -239,6 +240,53 @@ node scripts/generate-logos.mjs   # 替换 src/client/assets/logos/ 下图片后
 ```
 
 > `pnpm test` 用的是 Node 标准测试运行器（每个测试文件一个子进程）。在**禁止子进程管道**的环境里（例如 DSH 自带沙箱）它会以 `spawn EPERM` 失败——那是环境限制，不是测试失败；改用 `pnpm test:inline` 即可（需要 Node ≥ 22.8）。
+
+### 工程门禁（v1.0.0-rc.1 新增）
+
+```sh
+pnpm compatibility   # 宿主支持矩阵一致性：矩阵 / devDeps / peer / 源码能力清单
+pnpm verify:package  # 发布门禁：files、入口文件、.ts 残留、每个模块在产物里有痕迹
+pnpm doctor          # 只读诊断：宿主与插件版本、混装、cordis 实例同一性
+pnpm release         # 发布护栏：渠道判定、防 latest 倒退、产物 SHA-256（不自动发布）
+pnpm publish:guard   # 上面三项串起来跑一遍，全绿才算可发
+```
+
+**宿主基线是唯一真话**：`compatibility.json` 的 `recommendedHost` 决定
+`package.json` 的 devDependencies 该指向哪一版——它决定消费者 `npm install`
+之后拿到哪一版**类型**。改基线时四处一起改，`pnpm compatibility` 会替你验证。
+
+**宿主升级后的固定动作**（详见 [`docs/host-contract.md`](docs/host-contract.md)）：
+
+1. 改 `compatibility.json` 的 `recommendedHost` 与 `package.json` 的
+   `roundtable.hostBaseline`；
+2. 同步 devDependencies 到该版本，`pnpm install`；
+3. `pnpm typecheck && pnpm test`；
+4. `pnpm doctor` —— **先看混装与 cordis 同一性**，再怀疑 API 破坏；
+5. `pnpm compatibility && pnpm verify:package`；
+6. 重建 `lib/`；**宿主半体的改动需要重启 DSH**。
+
+> ⚠️ **cordis 必须是同一个物理副本**。宿主与插件各带一份 `@deepseek-ai/cordis`
+> 时，TypeScript 会当成两个模块，`declare module` 的 Context 声明合并失效，
+> 表现为编译期大片 `Property 'subagents' does not exist on type 'Context'`。
+> 这**不是** API 破坏——`pnpm doctor` 会直接告诉你是不是混装。
+
+### 发布
+
+```sh
+pnpm build && pnpm publish:guard
+npm publish --tag next --access public     # 预发布走 next，稳定版才用 latest
+npm view @huanlin/dsh-plugin-roundtable dist-tags
+```
+
+- 预发布（带 `-rc.N`）**只能**发到 `next`；验证通过后用
+  `npm dist-tag add <pkg>@<version> latest` 把**同一份产物**提升为 latest，
+  **不重新打包**。
+- 发布后必须做**消费者复验**：`dsh plugin --profile <新profile> add --save-exact <pkg>@<version>`，
+  并核对 registry 的 integrity 与本地候选产物一致。
+- 本机若 `pnpm install` 报 `ERR_SQLITE_ERROR / unable to open database file`，
+  那是 pnpm store 数据库不可用（不是依赖问题）：换一个可写的 store 路径，
+  或在能跑 pnpm 的机器上重装后同步 `node_modules`。此状态下也可以直接运行
+  `scripts/*.mjs`（它们不依赖 pnpm）。
 
 ## 许可证
 
