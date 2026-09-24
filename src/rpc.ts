@@ -44,6 +44,7 @@ import {
   writeMeeting,
 } from './state.ts'
 import { buildCharter } from './charter.ts'
+import { effectWithOptionalDisposer } from './harness-compat.ts'
 
 /** RPC result envelope (mirrors the apiproxy wire shape). */
 export type RpcResult<T> =
@@ -653,14 +654,10 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
   ctx.inject(['connection'], (connectionCtx) => {
     const connection = connectionCtx.connection as unknown as RpcConnection
     const disposer: unknown = connection.rpc.handle('/roundtable', dispatch)
-    // `connection.rpc.handle` returns the route disposer; hand it to the plugin
-    // fiber so the channel unmounts with the plugin.
-    if (typeof disposer === 'function') {
-      const release = disposer as () => unknown
-      connectionCtx.effect(() => () => {
-        void release()
-      }, 'roundtable: rpc channel')
-    }
+    // `connection.rpc.handle` 的返回值形状随 rc 线变过（disposer / undefined /
+    // Promise）。形状判定收在 harness-compat 里：不是函数时不注册清理器，
+    // 免得多挂一个永远不执行的 effect。
+    effectWithOptionalDisposer(connectionCtx, disposer, 'roundtable: rpc channel')
   })
   return dispatch
 }

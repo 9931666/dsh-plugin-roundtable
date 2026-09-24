@@ -28,6 +28,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { projectionValuesOf as projectionValuesOfSession } from './harness-compat.ts'
 
 /** Provider-reported cumulative usage of one session. */
 export interface SessionUsage {
@@ -104,15 +105,10 @@ export function normalizePressure(value: unknown): SessionPressure | undefined {
 function projectionValuesOf(ctx: Context, sessionId: string): Record<string, unknown> | undefined {
   if (sessionId === '') return undefined
   try {
-    const agent = ctx.agents.get(sessionId as SessionId)
-    const session = (agent as { session?: unknown } | undefined)?.session
-    if (session === undefined || session === null) return undefined
-    const projections = ctx.get('sessionProjections') as ProjectionReadFace | undefined
-    if (projections === undefined || typeof projections.snapshot !== 'function') return undefined
-    const snapshot = projections.snapshot(session, ['tokenUsage', 'contextPressure'])
-    const values = snapshot?.values
-    if (values === null || typeof values !== 'object') return undefined
-    return values as Record<string, unknown>
+    const agent = ctx.agents.get(sessionId as SessionId) as { session?: unknown } | undefined
+    // 投影读取（服务探测 + snapshot 形状 + 抛错兜底）统一收在 harness-compat：
+    // 宿主投影形状随 rc 线变过，且测量用量是观察行为，绝不能反过来弄崩调用方。
+    return projectionValuesOfSession(ctx, agent?.session)
   } catch {
     return undefined
   }

@@ -28,6 +28,12 @@ import { attachNodeEvents } from './node-events.ts'
 import { connectionFenceOf, MAX_RPC_BODY_BYTES, rejectWebRequest } from './web-guard.ts'
 import { collectMeetingSnapshots } from './snapshot.ts'
 import { registerRpc, RPC_ROUTE, type RoundTableRuntime } from './rpc.ts'
+import {
+  WEB_SERVER_KEYS,
+  WORKSPACE_KEYS,
+  webRouteHostOf,
+  workspaceRegistryOf,
+} from './harness-compat.ts'
 import { setWorkspaceCandidates, workspaceCandidates } from './workspace-candidates.ts'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -130,24 +136,6 @@ function usageSectionText(toolNames: string): string {
 
 Tools: ${toolNames}`
 }
-
-/** Web-server service slice used to register the snapshot route. */
-interface WebRouteHost {
-  register(route: {
-    kind: 'exact' | 'prefix'
-    path: string
-    handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
-  }): () => void
-}
-
-/** Workspace registry slice used to enumerate state roots. */
-interface WorkspaceListHost {
-  list(): { title: string; path: string }[]
-}
-
-/** Structural service-key candidates (newest first). */
-const WEB_SERVER_KEYS = ['webServer', 'httpServer'] as const
-const WORKSPACE_KEYS = ['workspaceRegistry', 'workspace'] as const
 
 export function apply(ctx: Context, config: Config): void {
   const resolved = {
@@ -277,7 +265,9 @@ export function apply(ctx: Context, config: Config): void {
   let webRegistered = false
   let rpcRouteRegistered = false
   const registerWebSurface = (): void => {
-    const webServer = (ctx.get(WEB_SERVER_KEYS[0]) ?? ctx.get(WEB_SERVER_KEYS[1])) as WebRouteHost | undefined
+    // 服务解析统一走 harness-compat：候选键探测 + 探测结果留痕（诊断用），
+    // 且**绝不成为加载门禁** —— 取不到就静默降级，插件其余部分照常工作。
+    const webServer = webRouteHostOf(ctx)
     if (webServer === undefined) return
     // 第 2 批（P5）：宿主 webserver 不会自动施加 Host/Origin + 浏览器认证栅栏，
     // 必须由路由自己调 `connection.requestRejection`。取不到该服务时放行（最小
@@ -337,7 +327,7 @@ export function apply(ctx: Context, config: Config): void {
     }
 
     if (webRegistered) return
-    const workspaceRegistry = (ctx.get(WORKSPACE_KEYS[0]) ?? ctx.get(WORKSPACE_KEYS[1])) as WorkspaceListHost | undefined
+    const workspaceRegistry = workspaceRegistryOf(ctx)
     if (workspaceRegistry === undefined) return
     webRegistered = true
     const refreshCandidates = (): void => {

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "recommendedHost": "0.1.5-rc.3",
+  "previewTag": "next",
+  "supportedHosts": [
+    {
+      "version": "0.1.5-rc.3",
+      "track": "recommended"
+    }
+  ],
+  "capabilities": {
+    "required": [
+      "tools",
+      "subagents",
+      "agents",
+      "systemPrompt"
+    ],
+    "optional": [
+      "connection",
+      "llm",
+      "skills",
+      "settings",
+      "userQuestions",
+      "sessionProjections",
+      "webServer",
+      "workspaceRegistry"
+    ]
+  },
+  "baseline": {
+    "note": "开发/类型基线必须与 recommendedHost 精确一致：插件发布后，消费者任何机器上 npm install 拿到的类型就是这里声明的版本。三者（本文件、package.json 的 devDependencies、src/index.ts 的 inject）由 scripts/compatibility.mjs 强制一致。",
+    "packages": [
+      "@deepseek-ai/dsh-agent",
+      "@deepseek-ai/dsh-atomic-write",
+      "@deepseek-ai/dsh-client-connection",
+      "@deepseek-ai/dsh-client-locale",
+      "@deepseek-ai/dsh-client-ui-conversation",
+      "@deepseek-ai/dsh-client-ui-renderer",
+      "@deepseek-ai/dsh-client-ui-settings",
+      "@deepseek-ai/dsh-client-ui-tool",
+      "@deepseek-ai/dsh-host-webserver",
+      "@deepseek-ai/dsh-llm",
+      "@deepseek-ai/dsh-session",
+      "@deepseek-ai/dsh-settings",
+      "@deepseek-ai/dsh-skill",
+      "@deepseek-ai/dsh-subagent",
+      "@deepseek-ai/dsh-system-prompt",
+      "@deepseek-ai/dsh-tools",
+      "@deepseek-ai/dsh-user-questions",
+      "@deepseek-ai/dsh-workspace"
+    ]
+  }
+}
