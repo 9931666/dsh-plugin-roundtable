@@ -63,6 +63,8 @@ export interface WireBudget {
   maxTokens: number
   usedRounds: number
   usedTokens: number
+  /** 第 3 批：provider 上报的真实用量（0 = 此刻不可测）。 */
+  usedTokensReal?: number
 }
 
 export interface WirePendingDecision {

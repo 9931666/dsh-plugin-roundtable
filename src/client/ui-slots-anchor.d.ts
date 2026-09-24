@@ -81,7 +81,21 @@ type RoundTableSlotInjectionEffect = (() => void) | Iterable<() => void>
  */
 interface RoundTableSlotEntry {
   name: string
-  id: string
+  /**
+   * Entry id for `id`-dispatched slots (`conversation.view`, `settings.section`).
+   * Optional because a **keyed** slot is claimed with `key` instead — the host's
+   * own official example registers `tool.call.toolview` as
+   * `{ name: 'tool.call.toolview', key: '<tool name>' }` **without** an `id`
+   * (`dsh-cordis-client-runner/lib/client.js`).
+   */
+  id?: string
+  /**
+   * Dispatch key for a `keyed` slot. For `tool.call.toolview` the key IS the wire
+   * tool name, and the key domain is open: registering one of your OWN tool names
+   * is additive, a key the shipped composition already covers is replaced, and an
+   * unclaimed key falls back to the generic tool row.
+   */
+  key?: string
   order?: number
   label?: string | (() => string)
   locale?: string

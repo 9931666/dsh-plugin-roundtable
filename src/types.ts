@@ -32,7 +32,7 @@ export type NodeStatus = 'idle' | 'working' | 'ready' | 'removed'
 export type EdgeDirection = 'forward' | 'bidirectional'
 
 /** What one transcript line records. */
-export type UtteranceKind = 'speech' | 'proxy-thinking' | 'retrieval' | 'decision'
+export type UtteranceKind = 'speech' | 'proxy-thinking' | 'retrieval' | 'decision' | 'auto-capture'
 
 /** Node statuses that still count as participants. */
 export const ACTIVE_NODE_STATUSES: readonly NodeStatus[] = ['idle', 'working', 'ready']
@@ -63,6 +63,10 @@ export interface MeetingNode {
   reasoningEffort?: string
   status: NodeStatus
   joinedAt: number
+  /** 最近一次失败的可读说明（第 1 批）。子代理以 error 结束、或 provider 请求
+   *  失败时写入，下一次成功产出时清除 —— 让"这位专家到底跑起来了没有"在
+   *  `roundtable_status` 里直接可见，而不是只留一个 removed 墓碑。 */
+  lastError?: string
 }
 
 /** One directed channel between two participants. */
@@ -109,6 +113,12 @@ export interface MeetingBudget {
   maxTokens: number
   usedRounds: number
   usedTokens: number
+  /**
+   * 最近一次测得的 **provider 上报**用量（第 3 批）。与 `usedTokens`（发言文本
+   * 粗估）**并列而非替代** —— 熔断口径不变，仍走 `usedTokens`。缺省/0 表示
+   * 此刻没有可测的 live 子会话。
+   */
+  usedTokensReal?: number
 }
 
 /**

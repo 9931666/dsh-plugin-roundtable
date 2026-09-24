@@ -24,6 +24,8 @@ import type {} from '@deepseek-ai/dsh-user-questions'
 // Declaration merge only: makes ctx.skills visible (R2: DSH 原生 skill 能力).
 import type {} from '@deepseek-ai/dsh-skill'
 import { registerRoundTableTools } from './tools.ts'
+import { attachNodeEvents } from './node-events.ts'
+import { connectionFenceOf, MAX_RPC_BODY_BYTES, rejectWebRequest } from './web-guard.ts'
 import { collectMeetingSnapshots } from './snapshot.ts'
 import { registerRpc, RPC_ROUTE, type RoundTableRuntime } from './rpc.ts'
 import { setWorkspaceCandidates, workspaceCandidates } from './workspace-candidates.ts'
@@ -243,6 +245,9 @@ export function apply(ctx: Context, config: Config): void {
       }
     },
   })
+  // 第 1 批：接入宿主子代理生命周期 —— 专家产出自动落盘（即使它没调
+  // roundtable_speak 或中途中断），失败原因写进 node.lastError。
+  attachNodeEvents(ctx)
   ctx.inject(['settings'], (settingsCtx) => {
     try {
       const scope = settingsCtx.settings.register(SETTINGS_NAMESPACE, PreferenceSchema, {
@@ -274,6 +279,10 @@ export function apply(ctx: Context, config: Config): void {
   const registerWebSurface = (): void => {
     const webServer = (ctx.get(WEB_SERVER_KEYS[0]) ?? ctx.get(WEB_SERVER_KEYS[1])) as WebRouteHost | undefined
     if (webServer === undefined) return
+    // 第 2 批（P5）：宿主 webserver 不会自动施加 Host/Origin + 浏览器认证栅栏，
+    // 必须由路由自己调 `connection.requestRejection`。取不到该服务时放行（最小
+    // profile 不能因此瘫痪），但只要能取到就一定要用。
+    const fence = connectionFenceOf(ctx.get('connection'))
 
     // RPC route: needs only the web server, so it mounts on its own.
     if (!rpcRouteRegistered) {
@@ -289,6 +298,11 @@ export function apply(ctx: Context, config: Config): void {
             })
             res.end(JSON.stringify(body))
           }
+          const rejection = rejectWebRequest(fence, req.headers)
+          if (rejection !== undefined) {
+            send(rejection, { ok: false, error: { code: 'forbidden', message: 'connection trust check failed' } })
+            return
+          }
           if ((req.method ?? 'GET').toUpperCase() !== 'POST') {
             send(405, { ok: false, error: { code: 'internal', message: 'this route accepts POST only' } })
             return
@@ -296,7 +310,16 @@ export function apply(ctx: Context, config: Config): void {
           let body: unknown
           try {
             const chunks: Buffer[] = []
-            for await (const chunk of req) chunks.push(chunk as Buffer)
+            let size = 0
+            for await (const chunk of req) {
+              size += (chunk as Buffer).length
+              // 第 2 批：无上限的请求体等于让任何本机页面把整包塞进内存。
+              if (size > MAX_RPC_BODY_BYTES) {
+                send(413, { ok: false, error: { code: 'internal', message: 'request body too large' } })
+                return
+              }
+              chunks.push(chunk as Buffer)
+            }
             body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
           } catch {
             send(400, { ok: false, error: { code: 'internal', message: 'body must be JSON' } })
@@ -328,6 +351,13 @@ export function apply(ctx: Context, config: Config): void {
       kind: 'exact',
       path: '/plugins/dsh-plugin-roundtable/state',
       handler: async (req, res) => {
+        // 第 2 批（P5）：这条 GET 会吐出所有会议的摘要、评审方案与发言。
+        const rejection = rejectWebRequest(fence, req.headers)
+        if (rejection !== undefined) {
+          res.writeHead(rejection, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ meetings: [] }))
+          return
+        }
         const url = new URL(req.url ?? '/', 'http://x')
         const roots = workspaceCandidates().map((workspace) => ({
           workspace: workspace.title,

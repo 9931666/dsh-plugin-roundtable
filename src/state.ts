@@ -3,7 +3,6 @@
  * `<workspace>/<stateDir>/<meetingId>/` with per-meeting process-local locks.
  *
  * - `meeting.json`     — the Meeting record (nodes, edges, decisions, budget).
- * - `charter.md`       — the injected《全局协作总纲》(informational copy).
  * - `transcript.jsonl` — append-only utterance log (torn-tail tolerant on read).
  * - `review.json`      — 针锋相对评审记录（议题/方案/观点/支持标记）。
  * - `user-actions.jsonl` — UI 行为记录（主持人下轮执行）。
@@ -11,7 +10,7 @@
  * @module dsh-plugin-roundtable/state
  */
 
-import { appendFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import type { FeedbackEntry, KbDigestEntry, KbDigestFile, Meeting, MeetingUtterance, ReviewRecord, UserAction } from './types.ts'
@@ -44,22 +43,73 @@ export function meetingDirOf(stateRoot: string, meetingId: string): string {
 }
 
 /**
- * Atomically publish a UTF-8 text file (same-directory tmp + rename).
+ * Drop every persisted record belonging to one meeting directory.
  *
- * A reader therefore only ever sees the previous content or the new one —
- * never a truncated in-between state. When the rename itself fails the tmp
- * file is moved aside as `.stale-<uuid>` rather than left as a dirty file
- * that a later reader could mistake for real content.
+ * `roundtable_create` reuses the id of a finished meeting (the id IS the
+ * sanitized name), and while `meeting.json` gets rewritten, `transcript.jsonl`
+ * is append-only and `review.json` / `user-actions.jsonl` / `export.md` /
+ * `kb-digest.json` simply stay behind. Without this reset a brand-new meeting
+ * inherits the previous one's utterances and review verbatim: the user is shown
+ * a review window for a plan that belongs to an entirely different meeting and
+ * is asked to endorse or reject flaws of a plan that is not the one on the
+ * table (P3).
+ *
+ * Idempotent — a missing directory is not an error.
+ */
+export async function resetMeetingDirectory(stateRoot: string, meetingId: string): Promise<void> {
+  await rm(meetingDirOf(stateRoot, meetingId), { recursive: true, force: true })
+}
+
+/** Cached host atomic writer: `null` = not resolved yet, `undefined` = unavailable. */
+let hostAtomicWriter: ((file: string, text: string) => Promise<void>) | undefined | null = null
+
+/**
+ * Resolve the host's atomic writer **without making it a load gate**.
+ *
+ * A static import would mean a composition that lacks
+ * `@deepseek-ai/dsh-atomic-write` fails to load this whole module — the same
+ * "optional capability became a hard gate" failure v0.2.36 fixed for cordis
+ * `inject`. So it is resolved once, lazily, and absence falls back to the local
+ * implementation below.
+ */
+async function resolveHostWriter(): Promise<((file: string, text: string) => Promise<void>) | undefined> {
+  if (hostAtomicWriter !== null) return hostAtomicWriter
+  try {
+    const host = await import('@deepseek-ai/dsh-atomic-write') as {
+      writeFileAtomic?: (file: string, content: string, options: { mode: number }) => Promise<void>
+    }
+    const write = host.writeFileAtomic
+    hostAtomicWriter = typeof write === 'function'
+      ? (file: string, text: string) => write(file, text, { mode: 0o644 })
+      : undefined
+  } catch {
+    hostAtomicWriter = undefined
+  }
+  return hostAtomicWriter
+}
+
+/**
+ * Atomically publish a UTF-8 text file.
+ *
+ * Prefers the host's `@deepseek-ai/dsh-atomic-write`: same-directory
+ * random-suffix temp + rename, plus the bounded retry for transient Windows
+ * `EACCES`/`EBUSY`/`EPERM` rename failures that our hand-rolled version lacked —
+ * it moved the temp aside as `.stale-*` and threw, so **that write was simply
+ * lost**. The host version removes its temp and rethrows instead.
+ *
+ * When the host does not provide that package, the local fallback keeps every
+ * state write working (same tmp + rename, minus the Windows retry) rather than
+ * failing the whole plugin.
  */
 export async function writeTextAtomic(file: string, text: string): Promise<void> {
+  const hostWrite = await resolveHostWriter()
+  if (hostWrite !== undefined) {
+    await hostWrite(file, text)
+    return
+  }
   const tmp = join(dirname(file), `.${randomUUID()}.tmp`)
   await writeFile(tmp, text, 'utf8')
-  try {
-    await rename(tmp, file)
-  } catch (error: unknown) {
-    await rename(tmp, `${file}.stale-${randomUUID()}`).catch(() => undefined)
-    throw error
-  }
+  await rename(tmp, file)
 }
 
 /** Atomically publish a JSON file (same-directory tmp + rename). */
@@ -91,13 +141,6 @@ export async function writeMeeting(stateRoot: string, meeting: Meeting): Promise
   await mkdir(dir, { recursive: true })
   meeting.updatedAt = Date.now()
   await writeJsonAtomic(join(dir, 'meeting.json'), meeting)
-}
-
-/** Persist the charter text copy. */
-export async function writeCharter(stateRoot: string, meeting: Meeting): Promise<void> {
-  const dir = meetingDirOf(stateRoot, meeting.id)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'charter.md'), meeting.charter, 'utf8')
 }
 
 /** Lock key serializing transcript appends for one meeting (A3).
@@ -369,10 +412,21 @@ export async function writeKbDigest(
  * 只记录结构化使用事实 + 用户主动填写的一句说明，绝不记录对话内容。
  * ------------------------------------------------------------------ */
 
+/** Lock key serializing every `feedback.jsonl` writer of one workspace (P11).
+ *
+ *  The file is workspace-scoped, so a meeting-scoped lock is not enough: one
+ *  meeting's "clear then append" used to rewrite the whole file while another
+ *  meeting was appending, silently dropping that entry. */
+function feedbackLockKey(stateRoot: string): string {
+  return `feedback:${stateRoot}`
+}
+
 /** Append one feedback entry to `<stateRoot>/feedback.jsonl`. */
 export async function appendFeedback(stateRoot: string, entry: FeedbackEntry): Promise<void> {
-  await mkdir(stateRoot, { recursive: true })
-  await appendFile(join(stateRoot, 'feedback.jsonl'), JSON.stringify(entry) + '\n', 'utf8')
+  return withMeetingLock(feedbackLockKey(stateRoot), async () => {
+    await mkdir(stateRoot, { recursive: true })
+    await appendFile(join(stateRoot, 'feedback.jsonl'), JSON.stringify(entry) + '\n', 'utf8')
+  })
 }
 
 /** Read every feedback entry (newest last), skipping torn tails. */
@@ -397,18 +451,22 @@ export async function readFeedback(stateRoot: string): Promise<FeedbackEntry[]> 
 
 /** Remove every feedback entry for one meeting id (dedupe); returns count removed. */
 export async function clearFeedbackForMeeting(stateRoot: string, meetingId: string): Promise<number> {
-  const before = await readFeedback(stateRoot)
-  const remaining = before.filter((entry) => entry.meetingId !== meetingId)
-  await writeTextAtomic(
-    join(stateRoot, 'feedback.jsonl'),
-    remaining.map((entry) => JSON.stringify(entry)).join('\n') + (remaining.length > 0 ? '\n' : ''),
-  )
-  return before.length - remaining.length
+  return withMeetingLock(feedbackLockKey(stateRoot), async () => {
+    const before = await readFeedback(stateRoot)
+    const remaining = before.filter((entry) => entry.meetingId !== meetingId)
+    await writeTextAtomic(
+      join(stateRoot, 'feedback.jsonl'),
+      remaining.map((entry) => JSON.stringify(entry)).join('\n') + (remaining.length > 0 ? '\n' : ''),
+    )
+    return before.length - remaining.length
+  })
 }
 
 /** Remove every feedback entry; returns how many were dropped. */
 export async function clearFeedback(stateRoot: string): Promise<number> {
-  const before = await readFeedback(stateRoot)
-  await writeTextAtomic(join(stateRoot, 'feedback.jsonl'), '')
-  return before.length
+  return withMeetingLock(feedbackLockKey(stateRoot), async () => {
+    const before = await readFeedback(stateRoot)
+    await writeTextAtomic(join(stateRoot, 'feedback.jsonl'), '')
+    return before.length
+  })
 }

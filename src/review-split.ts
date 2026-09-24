@@ -92,7 +92,8 @@ async function callSplitLlm(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), SPLIT_TIMEOUT_MS)
   try {
-    const chunks: string[] = []
+    const deltas: string[] = []
+    let assembled: string | null = null
     const stream = llm.stream({
       provider: config.provider,
       model: config.model,
@@ -117,20 +118,25 @@ async function callSplitLlm(
         block?: { type?: string; arguments?: unknown }
       }
       if (raw.type === 'tool-call-delta' && typeof raw.argumentsDelta === 'string') {
-        chunks.push(raw.argumentsDelta)
+        deltas.push(raw.argumentsDelta)
       } else if (raw.type === 'block-end' && raw.block?.type === 'tool-call' && typeof raw.block.arguments === 'string') {
-        chunks.push(raw.block.arguments)
+        // 终态整块已经包含全部分片。旧实现把它与分片一起 join，拼出
+        // 「片1片2…{完整 JSON}」——JSON.parse 必然失败并被 catch 吞掉，
+        // 于是 LLM 拆分每一次都静默退化为本地正则：观点维度与 C1 证据
+        // 分级从未真正生效过。这里改成覆盖式记录，绝不与分片相加。
+        assembled = raw.block.arguments
       } else if (raw.type === 'text' && typeof raw.delta === 'string') {
-        chunks.push(raw.delta)
+        deltas.push(raw.delta)
       } else if (raw.type === 'text' && typeof raw.text === 'string') {
-        chunks.push(raw.text)
+        deltas.push(raw.text)
       } else if (raw.type === 'text-delta' && typeof raw.text === 'string') {
         // dsh-llm 文本流式块：模型未走工具调用、直接输出 JSON 文本时的兜底收集。
-        chunks.push(raw.text)
+        deltas.push(raw.text)
       }
     }
-    const raw = chunks.join('')
-    return raw.trim() === '' ? null : raw
+    // 有组装完成的整块就优先用它；只有在完全没有 block-end 时才退回拼接分片。
+    const raw = (assembled ?? deltas.join('')).trim()
+    return raw === '' ? null : raw
   } catch {
     return null
   } finally {

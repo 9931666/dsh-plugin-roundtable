@@ -1020,6 +1020,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               <div className={styles.budgetFillTokens} style={{ width: `${tokensPct}%` }} />
             </div>
             <span className={styles.budgetValue}>{meeting.budget.usedTokens}/{meeting.budget.maxTokens}</span>
+            {typeof meeting.budget.usedTokensReal === 'number' && meeting.budget.usedTokensReal > 0 ? (
+              <span
+                className={styles.budgetLabel}
+                title="第 3 批：provider 上报的真实用量（只统计此刻可测的 live 专家会话），与左边的发言量粗估不是一回事"
+              >
+                真实 {meeting.budget.usedTokensReal}
+              </span>
+            ) : null}
           </div>
           {meeting.pendingDecisions.length > 0 ? (
             <div className={styles.decisionBanner}>

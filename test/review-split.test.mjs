@@ -6,7 +6,20 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { splitByMarkers } from '../src/review-split.ts'
+import { splitByMarkers, splitUtterance } from '../src/review-split.ts'
+
+/** 造一个只吐固定 chunk 序列的假 LLM（零网络、零余额）。 */
+function stubLlm(chunks) {
+  return {
+    stream() {
+      return (async function* () {
+        for (const chunk of chunks) yield chunk
+      })()
+    },
+  }
+}
+
+const SPLIT_CONFIG = { provider: 'stub', model: 'stub', maxOpinions: 3 }
 
 test('本地兜底：按「观点 N（维度）」切分且不丢正文', () => {
   const content = '观点 1（数据一致性）：先写后清不是原子操作，半行 JSON 会被静默跳过。 '
@@ -51,4 +64,83 @@ test('本地兜底：多行输入先归一化空白，仍能切出全部观点',
   assert.ok(lines !== null)
   assert.equal(lines.length, 3)
   assert.ok(lines[2].content.includes('第三条正文'))
+})
+
+/* ------------------------------------------------------------------ *
+ * P2 防回归：LLM 路径的流式 chunk 组装。
+ *
+ * 宿主适配器同时发 tool-call-delta 分片与 [DONE] 时的 block-end 完整 JSON。
+ * 旧实现把两者累进同一个数组再 join，拼出「片1片2…{完整 JSON}」，
+ * JSON.parse 必然失败并被 catch 吞掉 —— 于是每一次都静默退化为本地正则，
+ * 观点维度与 C1 证据分级从未生效。下面三条锁死这个协议。
+ * ------------------------------------------------------------------ */
+
+test('P2 防回归：block-end 的完整 JSON 绝不与分片相加', async () => {
+  const full = '{"viewpoints":[{"content":"驳回没反应","dimension":"交互","quote":"没反应"}]}'
+  const llm = stubLlm([
+    { type: 'tool-call-delta', argumentsDelta: '{"viewpoints":[{"content":"驳回没反应",' },
+    { type: 'tool-call-delta', argumentsDelta: '"dimension":"交互","quote":"没反应"}]}' },
+    { type: 'block-end', block: { type: 'tool-call', arguments: full } },
+  ])
+  const lines = await splitUtterance(llm, SPLIT_CONFIG, 'red', '用户点了驳回但界面没反应。')
+  assert.ok(
+    lines !== null,
+    '分片与整块相加会让 JSON 非法 → 退化为本地兜底 → 原文本无「观点 N」标记时返回 null',
+  )
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].dimension, '交互', '维度标签必须来自 LLM 输出')
+  assert.equal(lines[0].quote, '没反应', 'quote 是原文子串，应被保留')
+})
+
+test('P2 防回归：只有 block-end、没有分片时同样能解析', async () => {
+  const llm = stubLlm([
+    { type: 'block-end', block: { type: 'tool-call', arguments: '{"viewpoints":[{"content":"越权读取","dimension":"安全"}]}' } },
+  ])
+  const lines = await splitUtterance(llm, SPLIT_CONFIG, 'red', '存在越权读取。')
+  assert.ok(lines !== null)
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].dimension, '安全')
+})
+
+test('P2 防回归：只有分片、没有 block-end 时退回拼接（协议变体）', async () => {
+  const llm = stubLlm([
+    { type: 'tool-call-delta', argumentsDelta: '{"viewpoints":[{"content":"查询很慢",' },
+    { type: 'tool-call-delta', argumentsDelta: '"dimension":"性能"}]}' },
+  ])
+  const lines = await splitUtterance(llm, SPLIT_CONFIG, 'red', '查询很慢。')
+  assert.ok(lines !== null)
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].dimension, '性能')
+})
+
+test('P2：模型不走工具调用、直接输出 JSON 文本时仍可用', async () => {
+  const llm = stubLlm([
+    { type: 'text-delta', text: '{"viewpoints":[{"content":"兼容性缺口","dimension":"兼容"}]}' },
+  ])
+  const lines = await splitUtterance(llm, SPLIT_CONFIG, 'red', '兼容性有问题。')
+  assert.ok(lines !== null)
+  assert.equal(lines[0].dimension, '兼容')
+})
+
+test('P2：LLM 输出不可解析时才退化为本地兜底（且不丢正文）', async () => {
+  const llm = stubLlm([{ type: 'text-delta', text: '这不是 JSON' }])
+  const lines = await splitUtterance(llm, SPLIT_CONFIG, 'red', '观点 1（数据）：半行 JSON 会被静默跳过。')
+  assert.ok(lines !== null, '应走本地「观点 N」兜底而不是整条失败')
+  assert.equal(lines.length, 1)
+  assert.ok(lines[0].content.includes('半行 JSON'))
+})
+
+test('P2：maxOpinions 上限生效（超出部分被截断）', async () => {
+  const llm = stubLlm([
+    {
+      type: 'block-end',
+      block: {
+        type: 'tool-call',
+        arguments: '{"viewpoints":[{"content":"一","dimension":"A"},{"content":"二","dimension":"B"},{"content":"三","dimension":"C"}]}',
+      },
+    },
+  ])
+  const lines = await splitUtterance(llm, { provider: 'stub', model: 'stub', maxOpinions: 2 }, 'red', '一 二 三')
+  assert.ok(lines !== null)
+  assert.equal(lines.length, 2, '应被 maxOpinions=2 截断')
 })

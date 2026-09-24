@@ -184,3 +184,22 @@ test('导出：用户调整记录里注明"只含未清空的记录"', () => {
   const md = renderMeetingMarkdown(meeting(), [], [], undefined)
   assert.ok(md.includes('只包含尚未被主持人清空的记录'))
 })
+
+test('导出：预算行同时给出「发言量粗估」与 provider 上报的真实用量（第 3 批）', () => {
+  const md = renderMeetingMarkdown(
+    meeting({ budget: { maxRounds: 6, maxTokens: 120_000, usedRounds: 2, usedTokens: 3300, usedTokensReal: 45_000 } }),
+    UTTERANCES,
+    ACTIONS,
+    undefined,
+  )
+  assert.ok(md.includes('45000'), '真实用量必须出现在交付物里')
+  assert.ok(md.includes('真实用量'), '真实用量需要有自己的标签')
+  assert.ok(md.includes('发言文本粗估'), '必须说清两个数字不是一回事，否则又是在说谎')
+})
+
+test('导出：没有测得真实用量时给 0，而不是 undefined', () => {
+  const md = renderMeetingMarkdown(meeting(), [], [], undefined)
+  assert.ok(md.includes('真实用量'))
+  assert.ok(md.includes('：0 token'), '缺省应显式给 0')
+  assert.ok(!md.includes('undefined'), '导出里出现了 undefined')
+})

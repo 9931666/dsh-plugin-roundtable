@@ -28,6 +28,7 @@ import {
   readTranscript,
   readUserActions,
   readUserActionsReport,
+  resetMeetingDirectory,
   sanitizeKey,
   stateRootOf,
   withMeetingLock,
@@ -40,9 +41,11 @@ import { evaluateKbDigests, mergeKbDigestEntry } from './kb-digest.ts'
 import { PLUGIN_ID, HARNESS_RANGE } from './version.ts'
 import { buildCharter } from './charter.ts'
 import { aggregateUtterances } from './aggregator.ts'
+import { forgetNodeChild, reconcileNodeLiveness, registerNodeChild } from './node-events.ts'
+import { meetingRealUsage } from './token-usage.ts'
 import { proxyThinkingPrompt } from './proxy-thinking.ts'
-import { beginRound, ensureActive, estimateTokens, MeetingMutedError } from './budget.ts'
-import { deliverToNode, interruptNode, nodeActivity, spawnNode, steerCaptain, type MemberRuntimeConfig } from './members.ts'
+import { assertUsable, beginRound, budgetExceeded, estimateTokens, markMuted } from './budget.ts'
+import { deliverToNode, interruptNode, spawnNode, steerCaptain, type MemberRuntimeConfig } from './members.ts'
 import { splitByMarkers, splitUtterance, type SplitLlmLike } from './review-split.ts'
 import {
   formatMeetingDraft,
@@ -153,22 +156,41 @@ async function locateParticipantMeeting(stateRoot: string, agentId: string): Pro
   return located
 }
 
-/** Lock + captain-permission gate + active check: the inner captain-tool boilerplate. */
+/** Lock + captain-permission gate + budget gate: the inner captain-tool boilerplate. */
 async function withCaptainLock<T>(
   stateRoot: string,
   meetingId: string,
   captainId: string,
   action: string,
   operation: (fresh: Meeting) => Promise<T>,
+  options: { allowMuted?: boolean } = {},
 ): Promise<T> {
   return withMeetingLock(meetingLockKey(stateRoot, meetingId), async () => {
     const fresh = await readMeeting(stateRoot, meetingId)
     if (fresh === undefined || fresh.captainSessionId !== captainId) {
       throw new Error(`only the captain of meeting "${meetingId}" may ${action}`)
     }
-    ensureActive(fresh)
+    assertUsable(fresh, options)
     return operation(fresh)
   })
+}
+
+/**
+ * Assert a write may proceed, and make the muted fact durable before rethrowing.
+ *
+ * `assertUsable` never mutates, so somebody has to persist the mute — otherwise
+ * the UI keeps showing an `active` meeting that rejects everything (P1).
+ */
+async function assertUsablePersisting(stateRoot: string, meeting: Meeting): Promise<void> {
+  try {
+    assertUsable(meeting)
+  } catch (error: unknown) {
+    if (markMuted(meeting)) {
+      meeting.updatedAt = Date.now()
+      await writeMeeting(stateRoot, meeting)
+    }
+    throw error
+  }
 }
 
 type ParticipantIdentity =
@@ -217,8 +239,14 @@ async function recordUtterance(
   stateRoot: string,
   meeting: Meeting,
   utterance: Omit<MeetingUtterance, 'id' | 'ts' | 'round'>,
+  options: { opensNewRound?: boolean } = {},
 ): Promise<MeetingUtterance> {
-  ensureActive(meeting)
+  // P4: a captain contribution OPENS a round. `beginRound` existed but had no
+  // caller anywhere, so `meeting.round` stayed 0 for the meeting's whole life —
+  // every utterance landed in round 0 and the round-budget axis could never
+  // trip. Experts speak inside the round their captain opened.
+  if (options.opensNewRound === true) beginRound(meeting)
+  await assertUsablePersisting(stateRoot, meeting)
   const full: MeetingUtterance = {
     ...utterance,
     id: randomUUID(),
@@ -381,6 +409,11 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           if (existing !== undefined && existing.status !== 'ended' && existing.status !== 'archived') {
             throw new Error(`meeting id "${meetingId}" is taken — pick a different meeting name`)
           }
+          // P3：复用已结束会议的同名 id 之前必须清空该目录。transcript.jsonl 是
+          // append-only，review.json / user-actions.jsonl / export.md 也都留在原地，
+          // 否则新会议会原样继承上一场的发言与评审结论——用户可能对着另一个
+          // 议题的方案点「支持 / 驳回」。writeMeeting 随后会重建目录。
+          if (existing !== undefined) await resetMeetingDirectory(stateRoot, meetingId)
           const now = Date.now()
           const meeting: Meeting = {
             id: meetingId,
@@ -661,6 +694,9 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           if (node.id !== '') interruptNode(ctx, captain, node.id)
           throw error
         }
+        // 第 1 批：登记 childId → 会议位置，`subagent/end` 才能把这位专家的产出
+        // 自动落盘（它即便没调 roundtable_speak，或中途中断，也不会全丢）。
+        registerNodeChild(node.id, { stateRoot, meetingId })
         return {
           node_name: node.key,
           node_id: node.id,
@@ -708,6 +744,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         return { node, removedEdges: before - fresh.edges.length }
       })
       if (removed.node.id !== '') interruptNode(ctx, captain, removed.node.id)
+      forgetNodeChild(removed.node.id)
       return { node_name: removed.node.key, removed_edges: removed.removedEdges }
     },
   }))
@@ -835,7 +872,12 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           throw new Error(`unknown directed audience "${to}"`)
         }
         const kind = (args.kind ?? 'speech') as 'speech' | 'proxy-thinking' | 'retrieval'
-        const utterance = await recordUtterance(stateRoot, meeting, { nodeKey: speaker, kind, content, to: to === '' ? undefined : to })
+        const utterance = await recordUtterance(
+          stateRoot,
+          meeting,
+          { nodeKey: speaker, kind, content, to: to === '' ? undefined : to },
+          { opensNewRound: identity.kind === 'captain' },
+        )
         return {
           utterance_id: utterance.id,
           round: utterance.round,
@@ -874,7 +916,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       if (to === '') throw new Error('recipient must not be empty')
       const prepared = await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
         const { meeting, identity } = await requireFreshParticipant(stateRoot, located.id, caller.id)
-        ensureActive(meeting)
+        await assertUsablePersisting(stateRoot, meeting)
         const speaker = identity.kind === 'captain' ? CAPTAIN_KEY : identity.name
         if (meeting.mode !== 'egalitarian' && identity.kind === 'node' && to !== CAPTAIN_KEY) {
           throw new Error('orchestrated/redteam mode: nodes report to the captain only — the captain relays between nodes')
@@ -942,6 +984,10 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         items: { type: 'string' },
         description: 'Option labels (e.g. ["方案 A：模块化", "方案 B：一体化"]). The user may also type a custom answer.',
       },
+      multi_select: {
+        type: 'boolean',
+        description: 'Let the user tick MORE THAN ONE option in a single card. Use it for "which of these findings are real?" (review endorsements, defect shortlists) instead of asking one card per item — the selected labels come back joined by " · ". Leave it off for "pick one plan" decisions.',
+      },
     },
     output: {
       schema: {
@@ -962,6 +1008,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const captain = requireCaptain(exec)
       const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
       const located = await locateCaptainMeeting(stateRoot, captain.id)
+      const multiSelect = args.multi_select === true
       const question = String(args.question ?? '').trim()
       if (question === '') throw new Error('question must not be empty')
       const optionLabels = Array.isArray(args.options)
@@ -980,7 +1027,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       })
 
       const userQuestions = ctx.get('userQuestions') as
-        | { ask(request: { questions: { id: string; question: string; header?: string; options?: { label: string; description?: string }[] }[]; agent?: Agent; signal?: AbortSignal }): Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }> }
+        | { ask(request: { questions: { id: string; question: string; header?: string; options?: { label: string; description?: string }[]; multiSelect?: boolean }[]; agent?: Agent; signal?: AbortSignal }): Promise<{ answers: { id: string; selected: string[]; custom?: string }[] }> }
         | undefined
       if (userQuestions === undefined) {
         decision.status = 'resolved'
@@ -997,12 +1044,16 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           question,
           header: '圆桌会议 · 需人类决策',
           ...(optionLabels.length > 0 ? { options: optionLabels.map((label) => ({ label })) } : {}),
+          // 第 4 批：多选把"哪些缺陷是真的"这类认定从 N 次往返压到 1 次。
+          ...(multiSelect ? { multiSelect: true } : {}),
         }],
         agent: captain,
         signal: exec.signal,
       })
       const item = answer.answers.find((candidate) => candidate.id === decision.id)
-      const chosen = item?.selected[0]
+      const selected = Array.isArray(item?.selected) ? item.selected : []
+      // 多选时把勾选的标签连起来（" · "），单选保持单一标签。
+      const chosen = multiSelect && selected.length > 1 ? selected.join(' · ') : selected[0]
       const customAnswer = item?.custom !== undefined && item.custom !== '' ? item.custom : undefined
       await withMeetingLock(meetingLockKey(stateRoot, located.id), async () => {
         const fresh = await readMeeting(stateRoot, located.id)
@@ -1039,9 +1090,28 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         meetingLockKey(stateRoot, located.id),
         () => requireFreshParticipant(stateRoot, located.id, caller.id),
       )
-      const activity = nodeActivity(ctx, meeting.nodes)
+      const activity = await reconcileNodeLiveness(ctx, meeting.captainSessionId, meeting.nodes)
       const utterances = await readTranscript(stateRoot, meeting.id)
       const userActions = await readUserActions(stateRoot, meeting.id)
+      // 第 3 批：真实用量（provider 上报）。既作为派生输出，也 best-effort
+      // 缓存回 `meeting.budget.usedTokensReal`，供快照与导出读取；熔断口径
+      // 完全不受影响（仍走 usedTokens）。
+      const realUsage = meetingRealUsage(
+        ctx,
+        meeting.nodes.filter((node) => node.status !== 'removed' && node.id !== '').map((node) => node.id),
+      )
+      if (realUsage.measuredSessions > 0 && meeting.budget.usedTokensReal !== realUsage.measuredTotal) {
+        try {
+          await withMeetingLock(meetingLockKey(stateRoot, meeting.id), async () => {
+            const fresh = await readMeeting(stateRoot, meeting.id)
+            if (fresh === undefined) return
+            fresh.budget.usedTokensReal = realUsage.measuredTotal
+            await writeMeeting(stateRoot, fresh)
+          })
+        } catch {
+          // 缓存写失败绝不能影响状态查询。
+        }
+      }
       return {
         meeting_id: meeting.id,
         meeting_name: meeting.name,
@@ -1058,6 +1128,13 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           used_rounds: meeting.budget.usedRounds,
           used_tokens: meeting.budget.usedTokens,
         },
+        // 第 3 批：真实用量（provider 上报，仅 live 会话可测）——与上面的
+        // "发言文本粗估"并列展示，主持人才能对用户说清两者的区别。
+        tokens_real: {
+          measured_total: realUsage.measuredTotal,
+          measured_sessions: realUsage.measuredSessions,
+          unmeasured_sessions: realUsage.unmeasuredSessions,
+        },
         nodes: meeting.nodes
           .filter((node) => node.status !== 'removed')
           .map((node) => ({
@@ -1068,6 +1145,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
             reasoning_effort: node.reasoningEffort ?? '',
             status: node.status,
             activity: activity.get(node.key) ?? 'unspawned',
+            last_error: node.lastError ?? '',
           })),
         edges: meeting.edges.map((edge) => ({
           id: edge.id,
@@ -1187,7 +1265,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const located = await locateCaptainMeeting(stateRoot, captain.id)
       return withCaptainLock(stateRoot, located.id, captain.id, 'clear user actions', async (fresh) => {
         return clearUserActions(stateRoot, fresh.id)
-      })
+      }, { allowMuted: true })
     },
   }))
 
@@ -1444,7 +1522,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         const review = await readReview(stateRoot, fresh.id)
         if (review === undefined) throw new Error('no review record yet — call roundtable_start_review first')
         return { markdown: renderReviewMarkdown(review, fresh) }
-      })
+      }, { allowMuted: true })
     },
   }))
 
@@ -1485,7 +1563,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         const file = join(meetingDirOf(stateRoot, fresh.id), 'export.md')
         await writeTextAtomic(file, markdown)
         return { markdown, saved_to: file, bytes }
-      })
+      }, { allowMuted: true })
     },
   }))
 
@@ -1518,14 +1596,15 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       return withCaptainLock(stateRoot, located.id, captain.id, 'change the budget', async (fresh) => {
         if (typeof args.max_rounds === 'number') fresh.budget.maxRounds = Math.floor(args.max_rounds)
         if (typeof args.max_tokens === 'number') fresh.budget.maxTokens = Math.floor(args.max_tokens)
-        if (fresh.status === 'muted') {
-          if (fresh.round < fresh.budget.maxRounds && fresh.budget.usedTokens < fresh.budget.maxTokens) {
-            fresh.status = 'active'
-          }
+        // Escalation path: once the budget no longer exceeds its caps, the mute
+        // is lifted. This tool is reachable while muted (see allowMuted below) —
+        // it is the escape hatch, not another victim of the gate.
+        if (fresh.status === 'muted' && budgetExceeded(fresh) === undefined) {
+          fresh.status = 'active'
         }
         await writeMeeting(stateRoot, fresh)
         return { status: fresh.status, max_rounds: fresh.budget.maxRounds, max_tokens: fresh.budget.maxTokens }
-      })
+      }, { allowMuted: true })
     },
   }))
 
@@ -1556,7 +1635,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         fresh.status = 'ended'
         await writeMeeting(stateRoot, fresh)
         return roster
-      })
+      }, { allowMuted: true })
       for (const node of nodes) {
         if (node.id !== '') interruptNode(ctx, captain, node.id)
       }
@@ -1643,16 +1722,31 @@ function renderStatus(value: Record<string, unknown>): string {
   const pendingActions = Array.isArray(value.pending_actions) ? value.pending_actions as Record<string, unknown>[] : []
   const recent = Array.isArray(value.recent_utterances) ? value.recent_utterances as Record<string, unknown>[] : []
   const kbDigest = (value.kb_digest ?? {}) as Record<string, unknown>
+  const real = (value.tokens_real ?? {}) as Record<string, unknown>
+  const realMeasured = Number(real.measured_sessions ?? 0)
+  const realMissing = Number(real.unmeasured_sessions ?? 0)
+  const realLine = realMeasured === 0
+    ? 'Real token usage: not measurable right now (provider-reported usage requires a live child session)'
+    : `Real token usage (provider-reported): ${String(real.measured_total ?? 0)} tokens across ${realMeasured} expert session(s)${realMissing > 0 ? `; ${realMissing} not measurable` : ''}`
   const kbEntries = Array.isArray(kbDigest.entries) ? kbDigest.entries as Record<string, unknown>[] : []
   const kbListed = kbEntries.slice(0, KB_DIGEST_RENDER_LIMIT)
   const lines: string[] = [
     `Meeting "${String(value.meeting_name)}" (id ${String(value.meeting_id)}, mode ${String(value.mode)}, status ${String(value.status)}, round ${String(value.round)})`,
     `Knowledge base path: ${String(value.kb_path ?? '') === '' ? '(none)' : String(value.kb_path)}`,
     `Budget: ${String(budget.used_rounds)}/${String(budget.max_rounds)} rounds, ${String(budget.used_tokens)}/${String(budget.max_tokens)} tokens (spoken-text estimate only — NOT the real LLM spend)`,
+    realLine,
     `Nodes (${nodes.length}):`,
     ...nodes.map((node) => {
       const effort = String(node.reasoning_effort ?? '')
-      return `  - ${String(node.key)} [${String(node.role ?? '')}] ${String(node.status)}/${String(node.activity ?? '')} · ${String(node.provider ?? '')}/${String(node.model ?? '')}${effort === '' ? '' : ` @${effort}`}`
+      const activity = String(node.activity ?? '')
+      const base = `  - ${String(node.key)} [${String(node.role ?? '')}] ${String(node.status)}/${activity} · ${String(node.provider ?? '')}/${String(node.model ?? '')}${effort === '' ? '' : ` @${effort}`}`
+      // 第 1 批：接入宿主子代理树与请求失败事件之后，节点的真实处境可以直接
+      // 印在行下 —— 主持人不必再从"催办"里猜它是没唤醒、跑崩了还是已经没了。
+      const orphan = activity === 'missing'
+        ? '\n      ⚠ 宿主已不认识该专家的子代理（消息会投进虚空，建议重加）'
+        : ''
+      const error = String(node.last_error ?? '')
+      return `${base}${orphan}${error === '' ? '' : `\n      ⚠ ${error}`}`
     }),
     `Edges (${edges.length}):`,
     ...edges.map((edge) => `  - ${String(edge.from)} → ${String(edge.to)} (${String(edge.direction)})`),
@@ -1666,7 +1760,12 @@ function renderStatus(value: Record<string, unknown>): string {
     }),
     ...(kbEntries.length > kbListed.length ? [`  - …and ${kbEntries.length - kbListed.length} more cached entr(ies)`] : []),
     `Recent transcript:`,
-    ...recent.map((utterance) => `  [R${String(utterance.round)}] ${String(utterance.speaker)}${String(utterance.to ?? '') === '' ? '' : ` → ${String(utterance.to)}`}: ${String(utterance.content)}`),
+    ...recent.map((utterance) => {
+      const kind = String(utterance.kind ?? '')
+      // 第 1 批：把「subagent/end 自动捕获的产出」与专家主动发言区分开。
+      const tag = kind === '' || kind === 'speech' ? '' : ` {${kind}}`
+      return `  [R${String(utterance.round)}] ${String(utterance.speaker)}${tag}${String(utterance.to ?? '') === '' ? '' : ` → ${String(utterance.to)}`}: ${String(utterance.content)}`
+    }),
   ]
   return lines.join('\n')
 }
@@ -1706,6 +1805,7 @@ function renderReviewMarkdown(review: ReviewRecord, meeting: Meeting): string {
     .map((node) => `${node.key}（${node.provider ?? '-'}/${node.model ?? '-'}）`)
   out.push(`- **专家**：${expertRoutes.length === 0 ? '-' : expertRoutes.join('、')}`)
   out.push(`- **预算用量**：${meeting.budget.usedRounds}/${meeting.budget.maxRounds} 轮 · ${meeting.budget.usedTokens}/${meeting.budget.maxTokens} token`)
+  out.push(`- **真实用量（provider 上报）**：${meeting.budget.usedTokensReal ?? 0} token —— 上面的 token 数是"发言文本粗估"，不是真实账单`)
   out.push('---', '')
   out.push(renderReviewBody(review))
   return out.join('\n')
@@ -1788,6 +1888,7 @@ export function renderMeetingMarkdown(
   out.push(`- **创建时间**：${formatStamp(meeting.createdAt)}`)
   out.push(`- **${running ? '最后更新' : '结束时间'}**：${formatStamp(meeting.updatedAt)}`)
   out.push(`- **预算用量**：${meeting.budget.usedRounds}/${meeting.budget.maxRounds} 轮 · ${meeting.budget.usedTokens}/${meeting.budget.maxTokens} token`)
+  out.push(`- **真实用量（provider 上报）**：${meeting.budget.usedTokensReal ?? 0} token —— 上面的 token 数是"发言文本粗估"，不是真实账单`)
   if ((meeting.kbPath ?? '') !== '') out.push(`- **知识库**：${meeting.kbPath}`)
   if ((meeting.skills ?? []).length > 0) {
     out.push(`- **skill**：${(meeting.skills ?? []).map((skill) => `\`${skill}\``).join('、')}（传递方式 ${meeting.skillDelivery ?? 'relay'}）`)

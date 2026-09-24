@@ -9,12 +9,9 @@ export type RoundTableKey =
   | 'tab'
   | 'empty'
   | 'emptyHint'
-  | 'meeting'
-  | 'mode'
   | 'modeOrchestrated'
   | 'modeEgalitarian'
   | 'modeRedteam'
-  | 'status'
   | 'round'
   | 'roundsBudget'
   | 'tokensBudget'
@@ -105,7 +102,6 @@ export type RoundTableKey =
   | 'feedbackAskMeh'
   | 'feedbackAskBad'
   | 'feedbackAskNotePlaceholder'
-  | 'feedbackAskSubmit'
   | 'feedbackAskSkip'
   | 'feedbackAskSubmitted'
   | 'feedbackAskFailed'
@@ -203,12 +199,9 @@ export const zh: Record<RoundTableKey, string> = {
   tab: '圆桌会议',
   empty: '当前工作区还没有圆桌会议',
   emptyHint: '回到聊天，说一句「开个圆桌会议讨论……」，主持人就会拉起一支专家队伍并出现在这里。历史会议会一直保留在这个 Tab 里，随时可以切换查看。',
-  meeting: '会议',
-  mode: '协作模式',
   modeOrchestrated: '主持人统筹',
   modeEgalitarian: '多模型平等',
   modeRedteam: '针锋相对',
-  status: '状态',
   round: '轮',
   roundsBudget: '轮数',
   tokensBudget: 'Token',
@@ -362,7 +355,6 @@ export const zh: Record<RoundTableKey, string> = {
   feedbackAskMeh: '一般',
   feedbackAskBad: '没帮助',
   feedbackAskNotePlaceholder: '最卡的点是什么？（可选）',
-  feedbackAskSubmit: '提交',
   feedbackAskSkip: '跳过',
   feedbackAskSubmitted: '谢谢反馈！可随时在设置 → 圆桌会议 → 用户反馈中关闭或清空。',
   feedbackAskFailed: '反馈提交失败',
@@ -391,12 +383,9 @@ export const en: Record<RoundTableKey, string> = {
   tab: 'RoundTable',
   empty: 'No round-table meeting in this workspace yet',
   emptyHint: 'Go back to chat and say "start a round-table meeting to discuss…" — the captain will assemble a team of experts right here. Past meetings stay in this tab and can be switched back to anytime.',
-  meeting: 'Meeting',
-  mode: 'Mode',
   modeOrchestrated: 'Orchestrated',
   modeEgalitarian: 'Egalitarian',
   modeRedteam: 'Adversarial review',
-  status: 'Status',
   round: 'Round',
   roundsBudget: 'Rounds',
   tokensBudget: 'Tokens',
@@ -550,7 +539,6 @@ export const en: Record<RoundTableKey, string> = {
   feedbackAskMeh: 'Meh',
   feedbackAskBad: 'Not useful',
   feedbackAskNotePlaceholder: 'What was the biggest pain point? (optional)',
-  feedbackAskSubmit: 'Submit',
   feedbackAskSkip: 'Skip',
   feedbackAskSubmitted: 'Thanks! Manage or clear feedback anytime under Settings → RoundTable → User feedback.',
   feedbackAskFailed: 'Failed to submit feedback',

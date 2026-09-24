@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join } from 'node:path'
 import type { EdgeDirection, FeedbackEntry, RolePreset, UserAction } from './types.ts'
+import { interruptNodeByParent } from './members.ts'
 import {
   appendFeedback,
   appendUserAction,
@@ -184,12 +185,24 @@ async function withMeetingRpcLock<T>(
   runtime: RoundTableRuntime,
   meetingId: string,
   operation: (stateRoot: string) => Promise<RpcResult<T>>,
+  options: { requireActive?: boolean } = {},
 ): Promise<RpcResult<T>> {
   const { workspaceOfMeeting } = await import('./edge-helper.ts')
   const workspace = await workspaceOfMeeting(runtime.stateDir, meetingId)
   if (workspace === undefined) return fail(`meeting "${meetingId}" not found in any workspace`)
   const stateRoot = stateRootOf(workspace, runtime.stateDir)
-  return withMeetingLock(`meeting:${stateRoot}:${meetingId}`, () => operation(stateRoot))
+  return withMeetingLock(`meeting:${stateRoot}:${meetingId}`, async () => {
+    if (options.requireActive === true) {
+      // P10（第 2 批）：工具侧一直有 `assertUsable` 闸门，RPC 侧却完全没有状态机
+      // 校验 —— 已结束会议的拓扑与知识库还能被改（导出物与快照随即不一致），而
+      // 给已结束会议排的专家操作永远不会有人执行，只能变成孤儿记录挂在 UI 上。
+      const meeting = await readMeeting(stateRoot, meetingId)
+      if (meeting !== undefined && (meeting.status === 'ended' || meeting.status === 'archived')) {
+        return fail<T>(`meeting "${meetingId}" has ended — its topology is read-only`)
+      }
+    }
+    return operation(stateRoot)
+  })
 }
 
 /** 观点三态写入（V0.2.2）。幂等；状态变化时写结构化 user-action（V2 回写负载）。
@@ -347,7 +360,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               meeting.charter = buildCharter(meeting)
               await writeMeeting(stateRoot, meeting)
               return ok<{ direction: string }>({ direction: edge.direction })
-            })
+            }, { requireActive: true })
           }
           case 'roundtable/edge.add': {
             const body = payload as { meetingId?: unknown; from?: unknown; to?: unknown; direction?: unknown } | undefined
@@ -372,7 +385,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               meeting.charter = buildCharter(meeting)
               await writeMeeting(stateRoot, meeting)
               return ok({ edgeId: edge.id, from: edge.from, to: edge.to, direction: edge.direction })
-            })
+            }, { requireActive: true })
           }
           case 'roundtable/edge.remove': {
             const body = payload as { meetingId?: unknown; edgeId?: unknown } | undefined
@@ -387,7 +400,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               meeting.charter = buildCharter(meeting)
               await writeMeeting(stateRoot, meeting)
               return ok({ removed: before !== meeting.edges.length })
-            })
+            }, { requireActive: true })
           }
           case 'roundtable/meeting.delete': {
             const body = payload as { meetingId?: unknown } | undefined
@@ -397,12 +410,14 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return ok({ deleted: false })
               // Best-effort: interrupt the meeting's expert subagents first so
-              // no orphan keeps running after the meeting is gone.
-              const agents = (ctx as unknown as { agents?: { interrupt?: (id: string) => unknown } }).agents
+              // no orphan keeps running after the meeting is gone. 优先用不依赖
+              // live 父 Agent 的入口 —— 删会议时队长常常已经不在线，而
+              // `agents.interrupt` 那时只是静默 no-op。
               for (const node of meeting.nodes) {
-                if (node.id !== '' && agents?.interrupt !== undefined) {
-                  try { agents.interrupt(node.id) } catch { /* best-effort */ }
-                }
+                if (node.id === '') continue
+                if (interruptNodeByParent(ctx, node.id, meeting.captainSessionId)) continue
+                const agents = (ctx as unknown as { agents?: { interrupt?: (id: string) => unknown } }).agents
+                try { agents?.interrupt?.(node.id) } catch { /* best-effort */ }
               }
               await rm(meetingDirOf(stateRoot, meetingId), { recursive: true, force: true })
               return ok({ deleted: true })
@@ -440,7 +455,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               }
               await appendUserAction(stateRoot, meetingId, action)
               return ok({ id: action.id })
-            })
+            }, { requireActive: true })
           }
           case 'roundtable/user-actions.list': {
             const body = payload as { meetingId?: unknown } | undefined
@@ -502,7 +517,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               meeting.kbPath = resolved
               await writeMeeting(stateRoot, meeting)
               return ok({ path: resolved })
-            })
+            }, { requireActive: true })
           }
           case 'roundtable/kb.list': {
             // List the first level of the configured knowledge base (names,

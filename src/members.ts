@@ -292,6 +292,31 @@ export function interruptNode(ctx: Context, captain: Agent, childId: string): vo
   }
 }
 
+/**
+ * Interrupt one node **without** needing a live captain Agent.
+ *
+ * `ctx.subagents.interrupt` needs an ancestor Agent as its authority, so it is
+ * useless on paths that only hold session ids (the RPC surface, or a captain
+ * whose Agent is offline). The host's remote face is explicitly documented as
+ * "what keeps a live child interruptible while its parent Agent is offline".
+ *
+ * @returns true when the host accepted the request.
+ */
+export function interruptNodeByParent(ctx: Context, childId: string, parentSessionId: string): boolean {
+  if (childId === '' || parentSessionId === '') return false
+  const subagents = ctx.subagents as unknown as {
+    interruptByParent?: (childId: SessionId, parentId: SessionId, mode: 'continuable') => unknown
+  }
+  if (typeof subagents.interruptByParent !== 'function') return false
+  try {
+    subagents.interruptByParent(childId as SessionId, parentSessionId as SessionId, 'continuable')
+    return true
+  } catch (error: unknown) {
+    ctx.logger.warn(`roundtable: interruptByParent of node ${childId} failed: ${String(error)}`)
+    return false
+  }
+}
+
 /** Steer a live message into the captain at its nearest model boundary (best effort). */
 export function steerCaptain(captain: Agent, text: string): boolean {
   try {

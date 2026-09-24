@@ -55,6 +55,7 @@ export interface MeetingSnapshot {
     maxTokens: number
     usedRounds: number
     usedTokens: number
+    usedTokensReal?: number
   }
   nodes: {
     id: string
@@ -235,6 +236,7 @@ export async function collectMeetingSnapshots(
           maxTokens: meeting.budget.maxTokens,
           usedRounds: meeting.budget.usedRounds,
           usedTokens: meeting.budget.usedTokens,
+          usedTokensReal: meeting.budget.usedTokensReal ?? 0,
         },
         // 每个 key 只保留一条有效节点（删了重建 / 同名 key 多实例时取最新，
         // 非 removed 优先）。这样拓扑图与专家列表不会出现同一专家多条（避免
