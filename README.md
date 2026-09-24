@@ -94,13 +94,12 @@
 > [!NOTE]
 > 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.1.5-rc.2+**；v0.2.36 按 0.1.5-rc.2 宿主复核（对应 `@deepseek-ai/*` 0.1.5-rc.2 包），v0.2.31 起按 0.1.5-rc.1 复核，v0.2.1 起即适配 Cordis 4.0.2 / dsh 客户端架构，不再兼容 0.1.1-rc.2）。宿主 `alpha` 线的 0.1.6-alpha.2 尚未适配。
 
-**最快（npm，需要已 `npm login`）**：
+> [!IMPORTANT]
+> **本插件不发布到 npm。** 作者因**个人原因无法注册 npm 账户**（拿不到 `@huanlin` scope），
+> registry 上并不存在这个包，`dsh plugin add <包名>` 这条路走不通。
+> **从源码安装是唯一方式**（见下）。`package.json` 里的 `name` / `publishConfig` 只是仓库内的元数据。
 
-```sh
-dsh plugin --profile web add @huanlin/dsh-plugin-roundtable
-```
-
-或**从源码构建**（修改源码后重新 `pnpm build`，本地安装继续链接当前目录）：
+**从源码构建**（修改源码后重新 `pnpm build`，本地安装继续链接当前目录）：
 
 ```sh
 git clone https://github.com/9931666/dsh-plugin-roundtable
@@ -114,13 +113,13 @@ dsh plugin --profile web add .
 
 **从 0.1.1-rc.2 / 旧版升级**：宿主必须先升到 0.1.5-rc.1+；直接装 v0.2.31 覆盖旧插件，重启 DSH。历史会议记录（`.roundtable/`）跨大版本兼容性不保证，重要会议先导出。
 
-### npm 安装方式（等价，供脚本化）
+### 更新到最新版
 
 ```sh
-dsh plugin --profile web add @huanlin/dsh-plugin-roundtable
+git pull && pnpm build
 ```
 
-安装后重启 DSH、刷新 Web UI。然后在对话里直接用自然语言开会：
+插件以 `link:` 挂在本地目录上，重建后**重启 DSH** 即可。刷新 Web UI 后，直接在对话里用自然语言开会：
 
 > 开个圆桌会议，评审 v0.5 的架构方案，从性能、安全、成本三个角度各安排一位专家，最后给我一份汇总报告。
 
@@ -248,11 +247,11 @@ pnpm compatibility   # 宿主支持矩阵一致性：矩阵 / devDeps / peer / �
 pnpm verify:package  # 发布门禁：files、入口文件、.ts 残留、每个模块在产物里有痕迹
 pnpm doctor          # 只读诊断：宿主与插件版本、混装、cordis 实例同一性
 pnpm release         # 发布护栏：渠道判定、防 latest 倒退、产物 SHA-256（不自动发布）
-pnpm publish:guard   # 上面三项串起来跑一遍，全绿才算可发
+pnpm publish:guard   # 上面三项串起来跑一遍，全绿才算可发（渠道是 GitHub，不发 npm）
 ```
 
 **宿主基线是唯一真话**：`compatibility.json` 的 `recommendedHost` 决定
-`package.json` 的 devDependencies 该指向哪一版——它决定消费者 `npm install`
+`package.json` 的 devDependencies 该指向哪一版——它决定使用者 `pnpm install`
 之后拿到哪一版**类型**。改基线时四处一起改，`pnpm compatibility` 会替你验证。
 
 **宿主升级后的固定动作**（详见 [`docs/host-contract.md`](docs/host-contract.md)）：
@@ -270,19 +269,20 @@ pnpm publish:guard   # 上面三项串起来跑一遍，全绿才算可发
 > 表现为编译期大片 `Property 'subagents' does not exist on type 'Context'`。
 > 这**不是** API 破坏——`pnpm doctor` 会直接告诉你是不是混装。
 
-### 发布
+### 发布（只发 GitHub，不发 npm）
+
+> **本插件的发行渠道是 GitHub，不是 npm。** 作者个人原因无法注册 npm 账户，
+> 没有 registry 可发；下面的工程门禁依然全部有效，只是最后一步换成打 tag。
 
 ```sh
-pnpm build && pnpm publish:guard
-npm publish --tag next --access public     # 预发布走 next，稳定版才用 latest
-npm view @huanlin/dsh-plugin-roundtable dist-tags
+pnpm build && pnpm publish:guard                     # 全绿才算可发
+git tag v<version> && git push origin v<version>     # GitHub Release 的触发点
 ```
 
-- 预发布（带 `-rc.N`）**只能**发到 `next`；验证通过后用
-  `npm dist-tag add <pkg>@<version> latest` 把**同一份产物**提升为 latest，
-  **不重新打包**。
-- 发布后必须做**消费者复验**：`dsh plugin --profile <新profile> add --save-exact <pkg>@<version>`，
-  并核对 registry 的 integrity 与本地候选产物一致。
+- `scripts/release.mjs` 只做**产物快照**：渠道判定、防 latest 倒退、产物 SHA-256
+  与候选 `.tgz`（写到 `.git/pack-preview/`）。它**不调用 npm，也不会替你发布**。
+- 用户端安装方式恒为**源码 / GitHub**（见上文「安装」）——
+  registry 上不存在 `@huanlin/dsh-plugin-roundtable`，历史文档里出现的该命令一律不可用。
 - 本机若 `pnpm install` 报 `ERR_SQLITE_ERROR / unable to open database file`，
   那是 pnpm store 数据库不可用（不是依赖问题）：换一个可写的 store 路径，
   或在能跑 pnpm 的机器上重装后同步 `node_modules`。此状态下也可以直接运行

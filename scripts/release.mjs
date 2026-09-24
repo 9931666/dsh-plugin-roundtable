@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 /**
- * npm 发布护栏（发布语义门禁）。
+ * 发布护栏（发布语义门禁）。
+ *
+ * ⚠️ **现状（2026-09-24）：本插件不发布到 npm。**
+ *    作者因**个人原因无法注册 npm 账户**（`@huanlin` scope 拿不到），registry 上不存在
+ *    这个包，`npm publish` 必然 403。发行渠道改为 **GitHub**（`git tag` → Release）。
+ *    脚本因此只保留**产物指纹与版本一致性**这一半职责：registry 查询、渠道判定、
+ *    scope 提醒等 npm 语义项仍然照跑（它们正好解释了"为什么发不出去"），但
+ *    `--publish` 分支已停用。详见 `HANDOVER.md` §5.2。
  *
  * **发布是单向操作**：`npm publish` 之后版本永久存在，只能 `npm deprecate`，
  * 装过的人不会自动回退。所以"发之前该确认什么"必须由脚本回答，而不是靠记性。
@@ -23,7 +30,7 @@
  *
  * 用法：
  *   node scripts/release.mjs                # 只做检查与指纹（默认，安全）
- *   node scripts/release.mjs --publish      # 检查全绿后真正发布（仍走 npm）
+ *   node scripts/release.mjs --publish      # 已停用：本插件不发 npm（见上方现状说明）
  *   node scripts/release.mjs --json
  */
 import { createHash } from 'node:crypto'
@@ -325,16 +332,15 @@ if (fatalFailures.length > 0) {
 }
 
 if (doPublish) {
-  process.stdout.write(`\n检查全绿，开始发布（tag=${tag}，access=public）…\n`)
-  const { spawnSync } = await import('node:child_process')
-  const result = spawnSync('npm', ['publish', '--tag', tag, '--access', 'public'], {
-    cwd: root,
-    stdio: 'inherit',
-    env: { ...process.env, npm_config_cache: join(root, '.git', 'npm-cache') },
-  })
-  process.exit(result.status ?? 1)
+  // npm 路线已作废（作者个人原因无法注册 npm 账户，见 HANDOVER §5.2）：
+  // registry 上不存在这个包，继续 publish 只会拿到 403。这里直接拒绝，
+  // 而不是"跑一遍再失败"—— 发布是单向操作，不该留一个会误伤的分支。
+  process.stdout.write('\n--publish 已停用：本插件不发布到 npm，发行渠道是 GitHub。\n')
+  process.stdout.write(`  git tag v${version} && git push origin v${version}\n`)
+  process.exit(1)
 }
 
-process.stdout.write('\n检查全绿。确认无误后由你执行发布：\n')
-process.stdout.write(`  npm publish --tag ${tag} --access public\n`)
-process.stdout.write('（本脚本不会自动发布；加 --publish 才会真正推上去。）\n')
+process.stdout.write('\n检查全绿：这是一份可发布快照（产物 SHA-256 已记录）。\n')
+process.stdout.write('发行渠道是 GitHub，不是 npm：\n')
+process.stdout.write(`  git tag v${version} && git push origin v${version}\n`)
+process.stdout.write('（本脚本不调用 npm，也不会替你发布；CI 只据此创建 GitHub Release。）\n')

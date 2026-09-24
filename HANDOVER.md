@@ -11,7 +11,9 @@
 ## 0. 一句话现状
 
 插件已具备 1.0 候选形态：**功能齐备、四道工程门禁全绿、支持矩阵可校验**。
-下一个待办是**提示词与限定的打磨**（见 §4，那里是改什么、改哪里、怎么验）。
+**提示词与限定已完成第一轮**（见 §4）：usage / charter / persona 去重瘦身，
+跨 AI 交接改为"引用式信封 + 增量游标"，并新增体积护栏测试与预算脚本。
+下一批可选：21 个工具 description 的逐条瘦身（当前 10,598 字符 / 79 条，见 §4.2 第 6 行）。
 
 ---
 
@@ -56,7 +58,7 @@ c714bea  feat(compat): 宿主兼容边界集中化 + 支持矩阵单一来源（
 | 门禁 | 命令 | 当前结果 |
 | --- | --- | --- |
 | 类型 | `npm run typecheck` | 0 错误（对 rc.3） |
-| 测试 | `node --test --test-isolation=none "test/*.test.mjs"` | **133/133** |
+| 测试 | `node --test --test-isolation=none "test/*.test.mjs"` | **141/141** |
 | 构建 | `npm run build` | 通过 |
 | 矩阵 | `npm run compatibility` | 45/45 |
 | 产物 | `npm run verify:package` | 19/19 |
@@ -116,15 +118,16 @@ npm run doctor         # 若报混装或 cordis 不同副本，先解决环境�
 
 | # | 位置 | 影响谁 | 内容要点 |
 | --- | --- | --- | --- |
-| 1 | `src/index.ts` 的 `usageSectionText()`（约 120–132 行） | **主持人** | 13 条带会协议：创建流程、节点管理、预算诚实原则（Token 是估计不是账单）、skill 中转、针锋相对、导出等。通过 `ctx.systemPrompt.section({ order })` 注册，顺序由 config `promptSectionOrder`（默认 116）控制 |
-| 2 | `src/charter.ts` 的 `buildCharter()` | **所有专家** | 总纲四节：①会议背景与目标 ②团队与角色边界 ③标准化协作协议（`[当前状态]` / `[核心产出]` / `[下一步建议]` 格式）④全局约束与安全红线；redteam 模式追加第五节评审协议 |
-| 3 | `src/members.ts` 的 `nodePersona()`（约 148–178 行） | **每个专家** | 总纲 + 身份声明 + **工作规则 5 条** + skill 段 + 协作模式规则 + **回答限制 5 条**（只答相关 / 不用假设 / 不举无关例子 / 简洁 / 每轮意见数上限） |
-| 4 | `src/members.ts` 的 `skillSection()`（约 120–145 行） | 每个专家 | 按 `relay` / `direct` 两种传递方式给出不同约束（relay 时明令不得自己调 `skill` 工具） |
-| 5 | `src/members.ts` 的 `nodeWelcome()`（约 181 行） | 每个专家 | 节点创建时的首条用户消息（"你已加入…等待指令"） |
+| 1 | `src/prompt.ts` 的 `usageSectionText()` | **主持人** | 10 条带会协议（创建 → 编排 → 收尾），**2,493 字符**（原 7,924，且不再逐个列工具名 —— 工具 schema 本来就在请求里）。注册点仍是 `index.ts` 的 `ctx.systemPrompt.section({ order })`，顺序由 config `promptSectionOrder`（默认 116）控制 |
+| 2 | `src/charter.ts` 的 `buildCharter()` | **所有专家** | 总纲四节：①会议背景与目标 ②团队与角色边界 ③标准化协作协议（`[当前状态]` / `[核心产出]` / `[下一步建议]` 格式）④全局约束与安全红线；redteam 模式追加第五节。名单与通道压成单行，**548 字符** @5 人 |
+| 3 | `src/prompt.ts` 的 `nodePersona()` | **每个专家** | charter + 身份 + **工作规则 4 条** + skill 段 + 协作模式规则 + 回答限制，**1,202 字符**。总纲已写的红线（拍板 / 编造）在这里**不再重复** |
+| 4 | `src/prompt.ts` 的 `skillSection()` | 每个专家 | 按 `relay` / `direct` 两种传递方式给出不同约束（relay 时明令不得自己调 `skill` 工具） |
+| 5 | `src/prompt.ts` 的 `nodeWelcome()` | 每个专家 | 节点创建时的首条用户消息（"你已加入…等待指令"） |
 | 6 | `src/tools.ts` 各工具的 `description` | 主持人 | 工具语义与使用时机（`roundtable_*` 共 21 个） |
 | 7 | `src/review-split.ts` | 评审拆分 | 把专家发言拆成独立观点的 LLM 提示词 + 本地兜底切分规则 |
 | 8 | `src/proxy-thinking.ts` | 黑盒模型 | `[DeepSeek 代理思考]` 导演模板 |
 | 9 | `src/client/locales.ts` | 界面文案 | 中英文案（不是模型提示词，但影响用户读到的措辞） |
+| 10 | `src/prompt.ts` 的 `TASK_ENVELOPE` / `REPORT_ENVELOPE` | 主持人 + 专家 | 跨 AI 交接信封：转发只带 `R{n}[{speaker}]` 引用，专家按引用自行读 `transcript.jsonl` 取原文；双通道边界（`roundtable_speak` = 汇报且不唤醒任何人 / `roundtable_send_message` = 需要对方立刻行动）。专家看不到主持人的 usage 段，这两个工具的 description 才是专家侧的唯一指引 |
 
 ### 4.3 改动的验证方法
 
@@ -134,6 +137,7 @@ npm run doctor         # 若报混装或 cordis 不同副本，先解决环境�
 | 总纲格式被破坏 | `test/` 里没有直接测 charter 的用例；建议新增一个断言 `buildCharter(meeting)` 含四节标题的测试 |
 | 专家行为变化 | **必须实跑一场会**：`roundtable_plan_meeting` → 创建 → 加节点 → 观察专家发言是否遵守新约束。这是唯一有效的验证方式 |
 | 回答限制生效与否 | 看 `roundtable_status` 的 recent 与 `roundtable_export_meeting` 的逐轮发言，是否仍出现空话/无关内容 |
+| 提示词体积回涨 | `npm run prompt:budget`（`scripts/prompt-budget.mjs`）看三项数字；`test/prompt-budget.test.mjs` 已把上限写死（usage ≤3200 / charter ≤1200 / redteam ≤1700 / persona ≤2400 / 工具描述 ≤11200） |
 
 ### 4.4 改提示词时的注意事项
 
@@ -143,43 +147,53 @@ npm run doctor         # 若报混装或 cordis 不同副本，先解决环境�
   只针对某一类专家的约束应放 `nodePersona()` 或按 `node.role` 分支。
 - **redteam 模式有额外的第五节协议**（`charter.ts` 的 `redteamRules`），改总纲时别漏。
 - 措辞改动会影响 **token 用量**：总纲每次都会注入每个专家的上下文，越长越贵。
+  **这条现在是硬约束**：上限写在 `test/prompt-budget.test.mjs`，涨过就红。
+- **usage 段不要再写回 `index.ts`**：它被抽到 `src/prompt.ts`（纯文本、零运行时依赖），
+  正是为了能被测试直接 import 断言体积；`index.ts` 只保留 `ctx.systemPrompt.section()` 注册点。
+- **同一约束只写一处**：charter 与 persona 都会被每位专家长期携带，两处各写一遍就是付两遍钱
+  （`test/prompt-budget.test.mjs` 里有对应的去重断言）。
 
 ---
 
-## 5. 发布与推送（尚未完成）
+## 5. 发布与推送（npm 路线已作废）
 
-### 5.1 推送（本地领先 origin 6 个提交）
+### 5.1 推送
+
+截至 `ad7d7b3`，本地 `main` 与 `origin/main` 一致（此处原先写的"领先 6 个提交"已过时）。
 
 ```sh
 cd F:\AI\DSH\1changyong\dsh-plugin-roundtable
 git push origin main
 ```
 
-### 5.2 首次发布到 npm
+> ⚠️ **在 DSH 会话里（pwsh 沙箱）推不了**：`git push`、连只读的 `git ls-remote`
+> 都会以 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS` 失败 ——
+> 那是沙箱拦截了 schannel 取系统凭证，**不是凭证缺失**。必须在自己的终端窗口里推。
+> 若报找不到 `git-credential-manager`，把 `E:\xia zai\git\Git\mingw64\bin` 加进
+> `PATH` 再推（`git-credential-manager.exe` 在那里）。
+
+### 5.2 npm 发布：**已作废，不要再试**
+
+**结论**：作者**个人原因无法注册 npm 账户**，`@huanlin` scope 拿不到，
+`npm publish` 必然以 **403** 失败。这条路已放弃——不要再准备发布材料、不要再登录尝试。
+
+- `package.json` 的 `name` / `publishConfig` 保留为仓库内元数据，但 registry 上
+  **不存在**这个包；
+- 仓库历史文档（`release-notes/*`、README 旧版、`wenjian/roundTable/上架操作教程-npm与awesome.md`）
+  里出现的 `dsh plugin --profile web add @huanlin/dsh-plugin-roundtable` **一律不可用**；
+- 用户端唯一安装方式是**源码 / GitHub**：
+  `git clone https://github.com/9931666/dsh-plugin-roundtable` → `pnpm build` →
+  `dsh plugin --profile web add .`
+
+### 5.3 实际发行方式：GitHub
 
 ```sh
-npm login              # 当前未登录（ENEEDAUTH）
-npm run publish:guard  # 全绿才继续
-npm publish --tag next --access public
+npm run publish:guard                                # 门禁仍然有效，全绿才算可发
+git tag v1.0.0-rc.1 && git push origin v1.0.0-rc.1   # Release 的触发点
 ```
 
-> ⚠️ **发布前必须确认拥有 `@huanlin` scope**（在你自己的账号下创建）。
-> 没有该 scope 时 `publish` 会以 **403** 失败（不是 404）。
-> **包名一旦发布就无法更改**，所以这一步要在发布前定死。
-
-### 5.3 发布后
-
-```sh
-# 消费者复验（release.mjs 会打印这些命令）
-npm view @huanlin/dsh-plugin-roundtable@1.0.0-rc.1 dist.integrity
-dsh plugin --profile roundtable-verify add --save-exact @huanlin/dsh-plugin-roundtable@1.0.0-rc.1
-
-# 验证通过后提升为 latest（不重新打包，同一份字节）
-npm dist-tag add @huanlin/dsh-plugin-roundtable@1.0.0-rc.1 latest
-```
-
-发布渠道规则由 `scripts/release.mjs` 强制：预发布只能进 `next`，稳定版才允许进
-`latest`，且发布前会拒绝把 latest 指向更低的版本。
+`scripts/release.mjs` 只做产物快照（渠道判定 / 防 latest 倒退 / 产物 SHA-256 / 候选 `.tgz`
+写到 `.git/pack-preview/`）；它**完全不调用 npm，也不会自动发布**。
 
 ---
 
@@ -208,7 +222,7 @@ npm dist-tag add @huanlin/dsh-plugin-roundtable@1.0.0-rc.1 latest
 | 宿主覆盖 | 仅 rc.3 | 矩阵只有 `0.1.5-rc.3` 一条；`0.1.6-alpha.*` 是另一条线，未纳入 |
 | `internal/service` 监听 | 用途未确认 | `src/index.ts` 里那个监听器的实际作用没有查证 |
 | 跨 session 越权 | 接受现状 | RPC 通道不暴露调用者 session 身份；单人/单工作区无影响，多人共用同一实例时视作同一信任域 |
-| 包名 scope | **待确认** | `@huanlin` 必须是你能发布的 scope |
+| 包名 scope | **已作废** | 个人原因无法注册 npm 账户 → 不发 npm，发行渠道改为 GitHub（见 §5.2 / §5.3） |
 
 ---
 
@@ -216,9 +230,10 @@ npm dist-tag add @huanlin/dsh-plugin-roundtable@1.0.0-rc.1 latest
 
 | 想做什么 | 去哪 |
 | --- | --- |
-| 改主持人行为 | `src/index.ts` → `usageSectionText()` |
+| 改主持人行为 | `src/prompt.ts` → `usageSectionText()`（`index.ts` 只注册） |
 | 改所有专家的共同约束 | `src/charter.ts` → `buildCharter()` |
-| 改某个专家的规则/限制 | `src/members.ts` → `nodePersona()` |
+| 改某个专家的规则/限制 | `src/prompt.ts` → `nodePersona()`（`members.ts` 只再导出） |
+| 看提示词体积预算 | `npm run prompt:budget` → `scripts/prompt-budget.mjs` |
 | 改工具语义 | `src/tools.ts` 各 `description` |
 | 改评审拆分逻辑 | `src/review-split.ts` |
 | 改界面文案 | `src/client/locales.ts` |

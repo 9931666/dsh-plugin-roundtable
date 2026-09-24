@@ -1,4 +1,16 @@
-name: Publish Package
+name: Release
+
+# 本插件的发行渠道是 GitHub，不是 npm。
+# 作者因个人原因无法注册 npm 账户，registry 上**不存在** @huanlin/dsh-plugin-roundtable，
+# 所以这里不做、也不能做 npm publish（原先的 publish job 必然 403，并把依赖它的
+# Release job 一起拖死 —— 2026-09-24 起移除）。
+#
+# 工程门禁请在**打 tag 之前本地跑**（CI 这里只校验版本一致性，不重跑构建）：
+#     npm run publish:guard      # compatibility + verify:package + release
+#
+# 触发方式：
+#   git tag v<version> && git push origin v<version>
+# 要求 package.json 的 version 与 tag 严格对应，且 release-notes/v<version>.md 存在。
 
 on:
   push:
@@ -7,20 +19,19 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Package version to publish
+        description: Package version to release (must equal package.json version)
         required: true
         type: string
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write
 
 concurrency:
-  group: npm-publish-${{ github.ref_name }}
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
     if: github.repository == '9931666/dsh-plugin-roundtable'
     runs-on: ubuntu-latest
     steps:
@@ -33,13 +44,6 @@ jobs:
         run: |
           package_version="$(node --print "require('./package.json').version")"
           echo "value=${package_version}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          package-manager-cache: false
 
       - name: Verify release version
         env:
@@ -54,40 +58,13 @@ jobs:
             test "${RELEASE_VERSION}" = "${PACKAGE_VERSION}"
           fi
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build and pack
-        run: |
-          npm run typecheck
-          npm run build
-          npm pack --dry-run --ignore-scripts
-
-      - name: Publish to npm
-        run: npm publish --ignore-scripts --access public
-
-  release:
-    if: github.event_name == 'push'
-    needs: publish
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Read package version
-        id: version
-        shell: bash
-        run: |
-          package_version="$(node --print "require('./package.json').version")"
-          echo "value=${package_version}" >> "$GITHUB_OUTPUT"
-
       - name: Publish GitHub release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.value }}
           name: RoundTable v${{ steps.version.outputs.value }}
           body_path: release-notes/v${{ steps.version.outputs.value }}.md
           draft: false
-          prerelease: false
+          # 预发布（1.0.0-rc.1 这类）标成 prerelease，稳定版才是正式 Release。
+          prerelease: ${{ contains(steps.version.outputs.value, '-') }}
