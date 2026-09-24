@@ -40,7 +40,7 @@ import {
 import { evaluateKbDigests, mergeKbDigestEntry } from './kb-digest.ts'
 import { PLUGIN_ID, HARNESS_RANGE } from './version.ts'
 import { buildCharter } from './charter.ts'
-import { aggregateUtterances } from './aggregator.ts'
+import { aggregateUtterances, extractCore } from './aggregator.ts'
 import { forgetNodeChild, reconcileNodeLiveness, registerNodeChild } from './node-events.ts'
 import { meetingRealUsage } from './token-usage.ts'
 import { proxyThinkingPrompt } from './proxy-thinking.ts'
@@ -836,7 +836,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'roundtable_speak',
-    description: 'Write your contribution into the meeting transcript (the aggregation gateway input). Follow the charter format: start with [当前状态], end with [核心产出] and [下一步建议]; never output filler. Leave `to` empty to submit to the gateway; set it to a participant key for a directed remark.',
+    description: 'Report into the meeting transcript — the default channel: durable, feeds the aggregation gateway, and wakes nobody. Use this instead of roundtable_send_message unless someone must act right now. Keep the charter format and the report envelope [REPORT R{轮} {key}] 结论（≤3 条）｜证据｜待决策; [核心产出] is the exact segment the gateway captures. Leave `to` empty to submit to the gateway; set it to a participant key for a directed remark.',
     parameters: {
       content: { type: 'string', required: true, description: 'The full contribution text.' },
       to: { type: 'string', description: 'Directed audience: a node key or "captain". Empty submits to the aggregation gateway.' },
@@ -891,7 +891,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'roundtable_send_message',
-    description: 'Send a direct message to another participant: wakes the recipient as its next turn. In "orchestrated" mode only the captain may message nodes (nodes report to the captain); in "egalitarian" mode any participant may message any other — this is how experts debate peer-to-peer.',
+    description: 'Send a direct message that WAKES the recipient as its next turn — use it only when they must act right now; ordinary reporting goes through roundtable_speak (durable, wakes nobody). When forwarding someone else\'s opinion, quote the reference R{n}[{speaker}] instead of pasting the full text. In "orchestrated" mode only the captain may message nodes (nodes report to the captain); in "egalitarian" mode any participant may message any other — this is how experts debate peer-to-peer.',
     parameters: {
       to: { type: 'string', required: true, description: 'Recipient: "captain" or a node key.' },
       content: { type: 'string', required: true, description: 'The message text.' },
@@ -1076,13 +1076,16 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'roundtable_status',
-    description: 'Meeting snapshot: nodes with live activity, edges, budget, pending decisions, and the recent transcript tail. Poll this to watch progress.',
-    parameters: {},
+    description: 'Meeting snapshot: nodes with live activity, edges, budget, pending decisions, and the transcript tail. Poll it at the start of every round. Pass since=<the previous call\'s next_since> to receive ONLY new lines — cursor pagination that never skips a line; omitted, it returns the last 10. The cached knowledge-base digests print as one line each unless you pass kb_full=true.',
+    parameters: {
+      since: { type: 'integer', description: 'Cursor returned as next_since by the previous call: return only utterances at or after it. Omit to get the last 10.' },
+      kb_full: { type: 'boolean', description: 'Print the full cached KB digests instead of only their first line (default false — keeps every poll cheap).' },
+    },
     output: {
       schema: { type: 'object', additionalProperties: true, properties: {} },
       render: (_args, value) => [{ type: 'text', text: renderStatus(value as Record<string, unknown>) }],
     },
-    async execute(_args, exec) {
+    async execute(args, exec) {
       const caller = requireCaptain(exec)
       const stateRoot = stateRootOf(workspaceOf(caller), config.stateDir)
       const located = await locateParticipantMeeting(stateRoot, caller.id)
@@ -1093,6 +1096,17 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const activity = await reconcileNodeLiveness(ctx, meeting.captainSessionId, meeting.nodes)
       const utterances = await readTranscript(stateRoot, meeting.id)
       const userActions = await readUserActions(stateRoot, meeting.id)
+      // 增量游标（第 4 步）：本工具是主持人每轮都要调的那一个，把同一批"尾巴"
+      // 重复塞进历史是运行期最贵的一处浪费。since 采用"绝不跳过"的分页语义：
+      // 单次超出 STATUS_TAIL_MAX 的部分留给下一次调用，而不是静默丢弃。
+      const sinceArg = args.since
+      const since = typeof sinceArg === 'number' && Number.isFinite(sinceArg) && sinceArg > 0
+        ? Math.min(Math.floor(sinceArg), utterances.length)
+        : Math.max(0, utterances.length - STATUS_TAIL_DEFAULT)
+      const tail = utterances.slice(since)
+      const shownUtterances = tail.slice(0, STATUS_TAIL_MAX)
+      const nextSince = since + shownUtterances.length
+      const kbFull = args.kb_full === true
       // 第 3 批：真实用量（provider 上报）。既作为派生输出，也 best-effort
       // 缓存回 `meeting.budget.usedTokensReal`，供快照与导出读取；熔断口径
       // 完全不受影响（仍走 usedTokens）。
@@ -1165,13 +1179,18 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           model: action.model ?? '',
           text: action.text,
         })),
-        recent_utterances: utterances.slice(-10).map((utterance) => ({
+        recent_utterances: shownUtterances.map((utterance) => ({
           speaker: utterance.nodeKey,
           kind: utterance.kind,
-          content: utterance.content.slice(0, 400),
+          // 先取 [核心产出] 再截断：同样是几百字符的配额，取发言开头
+          // （[当前状态]）几乎拿不到结论，取核心产出才是主持人真正要的东西。
+          content: extractCore(utterance.summary ?? utterance.content).slice(0, STATUS_LINE_CHARS),
           to: utterance.to ?? '',
           round: utterance.round,
         })),
+        next_since: nextSince,
+        has_more: tail.length > shownUtterances.length,
+        kb_full: kbFull,
         kb_digest: await kbDigestOverview(stateRoot, meeting.id),
       }
     },
@@ -1713,6 +1732,21 @@ async function kbDigestOverview(stateRoot: string, meetingId: string): Promise<{
 /** 状态行里最多列几条缓存、每条摘要最多显示多少字符（避免状态输出失控）。 */
 const KB_DIGEST_RENDER_LIMIT = 10
 const KB_DIGEST_RENDER_CHARS = 800
+/** KB 摘要的默认呈现宽度（只印首行）：每次轮询都重印整份缓存是最容易被忽视
+ *  的重复成本 —— 正文只在主持人真要照它干活时才用 kb_full=true 取。 */
+const KB_DIGEST_PREVIEW_CHARS = 120
+/** 无 since 时返回的尾部条数（与原行为一致）。 */
+const STATUS_TAIL_DEFAULT = 10
+/** 单次最多返回条数；超出部分留给下一次 since 调用，绝不跳过任何一条。 */
+const STATUS_TAIL_MAX = 40
+/** status 里每条发言的字符上限（已先用 extractCore 取出核心产出）。 */
+const STATUS_LINE_CHARS = 240
+
+/** 取摘要的第一行作为预览（跳过空行）。 */
+function digestFirstLine(digest: string, limit: number): string {
+  const line = digest.split('\n').map((part) => part.trim()).find((part) => part !== '') ?? ''
+  return line.length > limit ? `${line.slice(0, limit)}…` : line
+}
 
 function renderStatus(value: Record<string, unknown>): string {
   const nodes = Array.isArray(value.nodes) ? value.nodes as Record<string, unknown>[] : []
@@ -1730,6 +1764,9 @@ function renderStatus(value: Record<string, unknown>): string {
     : `Real token usage (provider-reported): ${String(real.measured_total ?? 0)} tokens across ${realMeasured} expert session(s)${realMissing > 0 ? `; ${realMissing} not measurable` : ''}`
   const kbEntries = Array.isArray(kbDigest.entries) ? kbDigest.entries as Record<string, unknown>[] : []
   const kbListed = kbEntries.slice(0, KB_DIGEST_RENDER_LIMIT)
+  const kbFull = value.kb_full === true
+  const nextSince = Number(value.next_since ?? 0)
+  const hasMore = value.has_more === true
   const lines: string[] = [
     `Meeting "${String(value.meeting_name)}" (id ${String(value.meeting_id)}, mode ${String(value.mode)}, status ${String(value.status)}, round ${String(value.round)})`,
     `Knowledge base path: ${String(value.kb_path ?? '') === '' ? '(none)' : String(value.kb_path)}`,
@@ -1755,17 +1792,21 @@ function renderStatus(value: Record<string, unknown>): string {
     `KB digest cache: ${String(kbDigest.count ?? 0)} entry(ies), ${String(kbDigest.valid_count ?? 0)} still valid (HIT = reuse the digest; STALE = the file changed, read it again):`,
     ...kbListed.map((entry) => {
       const digest = String(entry.digest ?? '')
-      const shown = digest.length > KB_DIGEST_RENDER_CHARS ? `${digest.slice(0, KB_DIGEST_RENDER_CHARS)}…` : digest
+      const shown = kbFull
+        ? (digest.length > KB_DIGEST_RENDER_CHARS ? `${digest.slice(0, KB_DIGEST_RENDER_CHARS)}…` : digest)
+        : digestFirstLine(digest, KB_DIGEST_PREVIEW_CHARS)
       return `  - [${entry.valid === true ? 'HIT' : 'STALE'}] ${String(entry.path)}: ${shown}`
     }),
     ...(kbEntries.length > kbListed.length ? [`  - …and ${kbEntries.length - kbListed.length} more cached entr(ies)`] : []),
-    `Recent transcript:`,
+    ...(!kbFull && kbListed.length > 0 ? ['  (pass kb_full=true only if you actually need these digests in full)'] : []),
+    `Transcript${hasMore ? ' (more new lines remain — poll again with the cursor below)' : ''}:`,
     ...recent.map((utterance) => {
       const kind = String(utterance.kind ?? '')
       // 第 1 批：把「subagent/end 自动捕获的产出」与专家主动发言区分开。
       const tag = kind === '' || kind === 'speech' ? '' : ` {${kind}}`
       return `  [R${String(utterance.round)}] ${String(utterance.speaker)}${tag}${String(utterance.to ?? '') === '' ? '' : ` → ${String(utterance.to)}`}: ${String(utterance.content)}`
     }),
+    `Cursor: pass since=${nextSince} on the next poll to receive only new lines.`,
   ]
   return lines.join('\n')
 }

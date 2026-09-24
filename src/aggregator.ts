@@ -11,8 +11,11 @@ import type { MeetingUtterance } from './types.ts'
 const MAX_LENGTH = 4000
 const MAX_PER_UTTERANCE = 160
 
-/** Pull the "core output" / stance out of a formatted contribution, else compact the whole text. */
-function extractCore(text: string): string {
+/** Pull the "core output" / stance out of a formatted contribution, else compact the whole text.
+ *
+ *  导出给 `roundtable_status` 复用：同一条 400 字符的配额，取 `[核心产出]`
+ *  比取发言开头（`[当前状态]`）信息量大得多 —— 不是配额不够，是取错了地方。 */
+export function extractCore(text: string): string {
   const core = text.match(/\[核心产出\]\s*([\s\S]*?)(?=\n\s*\[|$)/)?.[1]?.trim()
   if (core) return core
   const stance = text.match(/(?:立场|主张|观点|结论)[：:]\s*([\s\S]*?)(?=\n|$)/)?.[1]?.trim()

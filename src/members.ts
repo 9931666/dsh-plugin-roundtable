@@ -17,6 +17,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { Meeting, MeetingNode, SkillDelivery } from './types.ts'
 import { ACTIVE_NODE_STATUSES, CAPTAIN_KEY } from './types.ts'
+import { nodePersona, nodeWelcome } from './prompt.ts'
+import type { ExpertLimits, NodeSkillContext } from './prompt.ts'
 
 /** Runtime knobs for node spawning, resolved from plugin config. */
 export interface MemberRuntimeConfig {
@@ -100,87 +102,11 @@ export function nodeToolRestriction(skillDelivery: SkillDelivery = 'relay'): Too
   return { deny: [...NODE_DENIED_TOOLS] }
 }
 
-/** Per-expert answer limits resolved from settings at spawn time. */
-export interface ExpertLimits {
-  /** Per-request output token cap (model max_tokens); 0 = unlimited. */
-  maxTokens?: number
-  /** Max opinions per round (prompt-level constraint); 0 = unlimited. */
-  maxOpinions?: number
-}
-
-/** 节点 persona 需要的 skill 上下文（R2：会议选中的 skill 与传递方式）。 */
-export interface NodeSkillContext {
-  /** 选择随 persona 注入的 skill 名称（缺省取 meeting.skills）。 */
-  names?: readonly string[]
-  /** 缺省取 meeting.skillDelivery。 */
-  delivery?: SkillDelivery
-  /** host 是否真的注册了 `skill` 工具（未注册时不得让专家去调它）。 */
-  skillToolAvailable?: boolean
-}
-
-/**
- * skill 段落：把"选了哪些 skill / 用哪种方式"写进 persona。
- *
- * direct 模式下这是**必须**的：`skill` 工具本身不带白名单参数，专家只有
- * 在 persona 里被告知可用清单，才知道能调什么（R2.3）。
- */
-function skillSection(meeting: Meeting, skill: NodeSkillContext): string {
-  const names = (skill.names ?? meeting.skills ?? []).filter((name) => name !== '')
-  const delivery = skill.delivery ?? meeting.skillDelivery ?? 'relay'
-  if (names.length === 0 && delivery !== 'direct') return ''
-  const list = names.length === 0 ? '（本次会议未选中任何 skill）' : names.map((name) => `\`${name}\``).join('、')
-  if (delivery === 'direct') {
-    const usable = names.length > 0 && skill.skillToolAvailable === true
-    return [
-      '',
-      `6. 本次会议选中的 skill：${list}。传递方式为「专家直接调用」：${usable
-        ? '需要 skill 的完整说明时，你自己调用 `skill` 工具（参数 name 传上方清单里的 skill 名）加载全文，然后严格按其约束工作；也可以加载清单之外的其他 skill。'
-        : '当前会话的 `skill` 工具不可用或未选中 skill，请不要尝试调用它，改用你自己的通用能力完成任务。'}`,
-    ].join('\n')
-  }
-  return [
-    '',
-    `6. 本次会议选中的 skill：${list}。传递方式为「主持人中转」：主持人会按需读取 skill 正文并把要点转交给你，你不需要也不应该自己调用 \`skill\` 工具；把这些 skill 的约束当作既定的工作前提。`,
-  ].join('\n')
-}
-
-/** The node's system prompt (persona): the charter plus node working rules. */
-export function nodePersona(
-  meeting: Meeting,
-  node: MeetingNode,
-  stateDir: string,
-  limits: ExpertLimits = {},
-  skill: NodeSkillContext = {},
-): string {
-  const modeRule = meeting.mode === 'egalitarian'
-    ? `- 协作模式为"多模型平等"：你可以用 roundtable_send_message 直接与任何其他节点（或主持人）交换意见，无需主持人中转。`
-    : `- 协作模式为"主持人统筹"：你只向主持人汇报；主持人会转达其他节点的观点给你。`
-  const opinionRule = limits.maxOpinions !== undefined && limits.maxOpinions > 0
-    ? `\n- 每轮最多提出 ${limits.maxOpinions} 条意见：宁缺毋滥，只保留最有价值、直接服务于议题的要点。`
-    : ''
-  return `${meeting.charter}
-
-你现在是会议"${meeting.name}"中的专家节点 ${node.key}${node.role !== undefined && node.role !== '' ? `，角色：${node.role}` : ''}。
-
-工作规则：
-1. 收到主持人的消息或任务后，完整执行一整轮工作，然后用 roundtable_speak 把你的产出写入会议记录（to 留空表示交给汇聚网关；定向回复某人时填对方节点名）。
-2. 发言遵循总纲第三节的格式：[当前状态] 开头、[核心产出] 与 [下一步建议] 结尾，严禁废话。
-3. 会议状态文件位于 ${stateDir}/${meeting.id}/（meeting.json 与 transcript.jsonl）。你可以只读查看，但严禁直接修改；一切状态变更走 roundtable_* 工具。
-4. 你是专家，不是主持人：不要创建/移除节点、不要修改连线、不要发起人类决策、不要结束会议、不要为别人下发会议设置卡片。
-5. 遇到无法独自决定的分歧，在发言中建议主持人触发 [需人类决策]，严禁替用户拍板。${skillSection(meeting, skill)}
-${modeRule}
-
-回答限制（省 token，务必遵守）：
-- 只回答与议题直接相关的内容；无关问题一律不答，直接说明"与议题无关"。
-- 不用假设代替事实；不确定就明确说"不确定"，严禁编造。
-- 不举无关的例子；举例必须直接服务于论点。
-- 语言简洁明了，不使用华丽修辞、空话、套话；能一句话说清的不用两句话。${opinionRule}`
-}
-
-/** The initial user message delivered when the node is created. */
-export function nodeWelcome(meeting: Meeting, node: MeetingNode): string {
-  return `你已加入圆桌会议"${meeting.name}"（会议 id ${meeting.id}）作为专家节点 ${node.key}。主持人会通过消息给你布置任务或转达其他节点的观点；收到后执行一整轮工作并用 roundtable_speak 汇报。现在等待主持人的指令。`
-}
+// 提示词资产（usage 段 / 专家 persona / 交接信封）集中在 prompt.ts：它是纯文本
+// 生成、零运行时依赖，因此可以被 test/ 直接 import 做体积护栏。这里只做转发
+// 与类型再导出，保证既有调用点不受影响。
+export { nodePersona, nodeWelcome }
+export type { ExpertLimits, NodeSkillContext }
 
 /**
  * Spawn one node as a durable continuable subagent of the captain and fill
