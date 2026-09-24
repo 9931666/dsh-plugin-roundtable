@@ -5,3 +5,7 @@ lib/
 .roundtable/
 .pnpm-store/
 .profile-backup/
+# 本机 pnpm 的默认 store 数据库损坏，改用仓库内的备用 store 跑 install；
+# 它是纯缓存，绝不入库。
+.pnpm-store2/
+*.tgz

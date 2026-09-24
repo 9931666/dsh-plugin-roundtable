@@ -117,7 +117,12 @@ const clientBundleConfig: UserConfig = {
   platform: 'browser',
   target: 'es2024',
   dts: false,
-  sourcemap: true,
+  // sourcemap 默认关闭：这份产物是**发给用户**的。曾经开着它，导致发布包里
+  // 多出一个 557 kB 的 lib/client.js.map —— 占了解包体积的 36%，而浏览器半体
+  // 是宿主从 /plugins/... 直接加载的 bundle，默认根本不会去取这个 .map，
+  // 真正的排查手段是 slot-boundary.tsx 渲染出来的可读报错面板。
+  // 本地需要时显式打开（例如：$env:RT_SOURCEMAP='1'; npm run bundle:client）。
+  sourcemap: process.env.RT_SOURCEMAP === '1',
   clean: false,
   external: CLIENT_EXTERNALS,
   noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
