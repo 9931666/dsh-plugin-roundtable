@@ -124,23 +124,131 @@ function userActionsLockKey(stateRoot: string, meetingId: string): string {
   return `user-actions:${stateRoot}:${meetingId}`
 }
 
-/** Read one meeting record; undefined when absent. */
+/** Read one meeting record; undefined when absent.
+ *
+ *  与 {@link readReview} 对齐：读出来的记录一律先过 {@link normalizeMeeting}
+ *  升级到当前 schema 版本。v0.2.36 之前这里是全插件唯一的「裸
+ *  `JSON.parse(...) as Meeting`」——形状一变老会议就静默读坏，而且没有任何
+ *  版本号可供分支。 */
 export async function readMeeting(stateRoot: string, meetingId: string): Promise<Meeting | undefined> {
   try {
     const raw = await readFile(join(stateRoot, meetingId, 'meeting.json'), 'utf8')
-    return JSON.parse(raw) as Meeting
+    return normalizeMeeting(JSON.parse(raw) as Meeting)
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
 }
 
-/** Persist one meeting record (atomic). */
+/** Persist one meeting record (atomic). 写入前同样过一遍 normalize：这样
+ *  「读时升级 + 下次写入顺带落盘」形成一个闭环，老文件不会永远停在旧版本。 */
 export async function writeMeeting(stateRoot: string, meeting: Meeting): Promise<void> {
   const dir = meetingDirOf(stateRoot, meeting.id)
   await mkdir(dir, { recursive: true })
-  meeting.updatedAt = Date.now()
-  await writeJsonAtomic(join(dir, 'meeting.json'), meeting)
+  const normalized = normalizeMeeting(meeting)
+  normalized.updatedAt = Date.now()
+  await writeJsonAtomic(join(dir, 'meeting.json'), normalized)
+}
+
+/* ------------------------------------------------------------------ *
+ * meeting.json 的 schema 版本与迁移通道
+ *  与 review.json 的 normalizeReview 同款设计，但写成「版本 → 迁移函数」
+ *  的表，因为 meeting.json 是本插件最核心的持久化文件，可见的版本会更多。
+ * ------------------------------------------------------------------ */
+
+/** 当前 `meeting.json` 的形状版本。加字段/改语义时递增，并在
+ *  {@link MEETING_MIGRATIONS} 补一条从「前一版」升上来的函数。 */
+export const CURRENT_MEETING_SCHEMA_VERSION = 1
+
+/**
+ * 相邻版本迁移表：键 = 源版本，值 = 把该版本升到「源版本 + 1」的函数。
+ *
+ * 当前 1 就是最新版，所以表为空——**这不是占位符**：把机制先建起来，是为了
+ * 让下一次改形状时只需要「加一条函数 + 递增常量」，而不是像 review.json 那样
+ * 等到不得不迁移时才回头补一套。
+ */
+const MEETING_MIGRATIONS: Readonly<Record<number, (meeting: Meeting) => Meeting>> = {}
+
+/** 每个会话只播报一次迁移告警，避免 1 秒轮询的快照把日志刷爆。 */
+const notifiedMeetingMigrations = new Set<string>()
+
+/** 把「字段缺失/类型不符」的最小集合补成合法缺省值（幂等）。
+ *
+ *  只处理**不改语义**的兼容补齐，绝不猜测用户的意图，也绝不让缺失字段变成
+ *  `undefined` 混进后续计算（那正是「静默读坏」的样子）。 */
+function withMeetingDefaults(meeting: Meeting): Meeting {
+  if (!Array.isArray(meeting.nodes)) meeting.nodes = []
+  if (!Array.isArray(meeting.edges)) meeting.edges = []
+  if (!Array.isArray(meeting.decisions)) meeting.decisions = []
+  if (typeof meeting.round !== 'number' || !Number.isFinite(meeting.round)) meeting.round = 0
+  if (typeof meeting.charter !== 'string') meeting.charter = ''
+  const budget = meeting.budget as Partial<Meeting['budget']> | undefined
+  meeting.budget = {
+    maxRounds: typeof budget?.maxRounds === 'number' ? budget.maxRounds : 10,
+    maxTokens: typeof budget?.maxTokens === 'number' ? budget.maxTokens : 200000,
+    usedRounds: typeof budget?.usedRounds === 'number' ? budget.usedRounds : 0,
+    usedTokens: typeof budget?.usedTokens === 'number' ? budget.usedTokens : 0,
+    ...(typeof budget?.usedTokensReal === 'number' ? { usedTokensReal: budget.usedTokensReal } : {}),
+  }
+  return meeting
+}
+
+/**
+ * Idempotently upgrade one meeting record to
+ * {@link CURRENT_MEETING_SCHEMA_VERSION}（**内存内**，不写回；下次
+ * {@link writeMeeting} 落盘时顺带升级）。
+ *
+ * 缺失 `schemaVersion` 视为 1（v0.2.36 及之前的文件都是这个形状），然后
+ * 依次跑迁移表。三条防御：
+ *   - 迁移函数抛错 → 保留原记录并告警，**绝不让读会议失败**（读不出来比读得
+ *     不完美严重得多，那会让整场会议从界面上消失）；
+ *   - 版本高于当前（用户从新版本回退到老版本）→ 原样返回并告警，不做降级
+ *     猜测；
+ *   - 版本非法（非整数 / < 1）→ 归一到 1 再走迁移。
+ */
+export function normalizeMeeting(meeting: Meeting): Meeting {
+  const declared = meeting.schemaVersion
+  const from = typeof declared === 'number' && Number.isInteger(declared) && declared >= 1 ? declared : 1
+  if (declared !== from) meeting.schemaVersion = from
+
+  if (from > CURRENT_MEETING_SCHEMA_VERSION) {
+    const key = `future:${meeting.id}:${from}`
+    if (!notifiedMeetingMigrations.has(key)) {
+      notifiedMeetingMigrations.add(key)
+      console.warn(
+        `[roundtable] meeting "${meeting.id}" was written by a newer plugin (schemaVersion ${from} > ${CURRENT_MEETING_SCHEMA_VERSION}); reading it as-is`,
+      )
+    }
+    return withMeetingDefaults(meeting)
+  }
+
+  let current = meeting
+  let migrated = false
+  for (let version = from; version < CURRENT_MEETING_SCHEMA_VERSION; version += 1) {
+    const step = MEETING_MIGRATIONS[version]
+    if (step === undefined) continue
+    try {
+      current = step(current)
+      migrated = true
+    } catch (error: unknown) {
+      // 迁移失败必须降级为「原样读」，不能让整场会议读不出来。
+      const key = `failed:${meeting.id}:${version}`
+      if (!notifiedMeetingMigrations.has(key)) {
+        notifiedMeetingMigrations.add(key)
+        console.warn(
+          `[roundtable] meeting "${meeting.id}" schema migration ${version}→${version + 1} failed:`,
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+      break
+    }
+  }
+
+  current = withMeetingDefaults(current)
+  if (migrated || from < CURRENT_MEETING_SCHEMA_VERSION || declared !== from) {
+    current.schemaVersion = CURRENT_MEETING_SCHEMA_VERSION
+  }
+  return current
 }
 
 /** Lock key serializing transcript appends for one meeting (A3).

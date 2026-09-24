@@ -193,6 +193,19 @@ export interface KbDigestFile {
 
 /** The full durable meeting record (transcript lives in transcript.jsonl). */
 export interface Meeting {
+  /**
+   * 数据格式版本（`meeting.json` 的形状版本）。
+   *
+   * 与 `ReviewRecord.schemaVersion` 同一套机制：**缺失视为 1**（v0.2.36 及
+   * 之前写出的文件都没有这个字段）。读取时由 `normalizeMeeting()` 在内存里
+   * 幂等升到当前版本，下次 `writeMeeting` 顺带落盘。
+   *
+   * 存在的理由：`meeting.json` 是本插件最核心的持久化文件，此前却是唯一
+   * 「裸 `JSON.parse(...) as Meeting`」——形状一变，老文件要么读出 undefined
+   * 字段、要么静默损坏，且没有任何版本号可供分支。维护模式下「以后的改动
+   * 会不会读不出老会议」必须有一个明确答案，这个字段就是那个答案。
+   */
+  schemaVersion?: number
   /** Sanitized stable id; the meeting directory name. */
   id: string
   name: string

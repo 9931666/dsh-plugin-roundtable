@@ -123,9 +123,10 @@
 
 | 项 | 结果 |
 | --- | --- |
-| `tsc`（宿主 + 浏览器） | 通过 |
-| `node --test` | **退出码 0（全绿）** |
-| 测试文件数 / 源码行数 | 13 个 / 9,280 行 ≈ 14.8% |
+| `tsc`（宿主 + 浏览器） | 通过（`npm run typecheck` 退出码 0） |
+| `node --test` | **121/121 通过，0 失败**（14 个测试文件） |
+| 测试文件数 / 源码行数 | 14 个 / 9,400 行 ≈ 15% |
+| `npm run build` | 通过（`lib/index.js` 180.42 kB / `lib/client.js` 535.83 kB） |
 | 活体 RPC 冒烟 | `state` 200；`prefs.get`、`models.list`、`kb.list`、`feedback.list`、`user-actions.list`、`edge.add/remove`、`prefs.set` 全部 `ok:true` |
 
 ---
@@ -137,9 +138,46 @@
 | rc.3 契约未逐项验证 | **进行中** | 见第 0 节漂移表 |
 | rc.2 → rc.3 的 `.d.ts` diff | **未做** | 缺 rc.2 包，需先留一份副本才能 diff |
 | `internal/service` 监听的实际用途 | **未确认** | `src/index.ts:377` |
-| `meeting.json` 无 schema 版本 | **本批修复** | 见 `src/state.ts` 迁移通道 |
+| ~~`meeting.json` 无 schema 版本~~ | ✅ **已修复** | 见 §5：已补 `schemaVersion` + 迁移通道 |
 | 前端测试覆盖 | 无 | `RoundTableView.tsx` 1,723 行零测试 |
 | npm 发布 | 未发布 | registry 上查不到该包，目前只能本地装 |
+| 会议记录文件的 schema 版本 | 仅 `review.json` 有 | `transcript.jsonl` 暂不需要（append-only，无形状依赖） |
+
+---
+
+## 5. 数据格式版本与迁移通道（本插件的持久化契约）
+
+**`review.json` 早就有 `schemaVersion`，`meeting.json` 此前没有** —— 它是全插件
+唯一「裸 `JSON.parse(...) as Meeting`」。这意味着以后任何字段形状一变，老会议
+要么读出 `undefined` 字段、要么静默损坏，而且没有版本号可供分支。
+
+现在两者对齐，机制统一如下：
+
+| 文件 | 版本字段 | 迁移函数 | 缺失版本号视为 |
+| --- | --- | --- | --- |
+| `meeting.json` | `Meeting.schemaVersion` | `normalizeMeeting()` | **1** |
+| `review.json` | `ReviewRecord.schemaVersion` | `normalizeReview()` | **1** |
+| `transcript.jsonl` | 无（append-only，不需要） | — | — |
+| `kb-digest.json` | 无（缓存，坏了就重建） | — | — |
+
+### 改数据形状时的固定动作
+
+1. `src/state.ts` 的 `CURRENT_MEETING_SCHEMA_VERSION` **递增 1**；
+2. 在 `MEETING_MIGRATIONS` 里加一条 `版本号 → 迁移函数`（键 = 源版本，值 = 升到
+   源版本 + 1）；
+3. 在 `test/meeting-schema.test.mjs` 补一条「旧形状文件能读出来且业务字段不丢」
+   的用例。
+
+### 三条不可动摇的防御
+
+| 情形 | 行为 | 为什么 |
+| --- | --- | --- |
+| 版本号缺失 / 非法（0、负数、小数、字符串） | 归一到 1 再走迁移 | 旧文件必须永远可读 |
+| 版本号**高于**当前（用户从新版回退） | **原样返回**并 `console.warn`，不降级猜测 | 猜错会**写坏**用户的真实数据 |
+| 迁移函数抛错 | 保留原记录 + 告警，**绝不抛给调用方** | 读不出来比读得不完美严重得多——那会让整场会议从界面上消失 |
+
+> 写入侧同样过一遍 `normalizeMeeting()`，形成「读时升级 → 下次写入顺带落盘」的
+> 闭环，老文件不会永远停在旧版本。
 
 ---
 
