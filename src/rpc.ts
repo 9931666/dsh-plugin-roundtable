@@ -68,6 +68,8 @@ export interface RoundTablePreferences {
   readonly skillDelivery: 'relay' | 'direct'
   /** 右栏面板可见性（R3）：被列出的面板在拓扑页隐藏；空 = 全部显示。 */
   readonly hiddenPanels: string[]
+  /** A1：画布图例是否已被用户关闭（默认 false = 显示）。 */
+  readonly legendHidden: boolean
   /** B3：用户自建角色预设（全局偏好；不预置任何内置角色）。 */
   readonly rolePresets: RolePreset[]
   /** B3+：用户自建阵容预设（一次套用多位专家；同样不预置）。 */
@@ -346,6 +348,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               feedbackEnabled: prefs.feedbackEnabled ?? true,
               skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
               hiddenPanels: sanitizeHiddenPanels(prefs.hiddenPanels),
+              legendHidden: prefs.legendHidden === true,
               rolePresets: sanitizeRolePresets(prefs.rolePresets),
               squads: sanitizeSquads(prefs.squads),
             })
@@ -372,6 +375,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
                 feedbackEnabled: typeof patch.feedbackEnabled === 'boolean' ? patch.feedbackEnabled : (base.feedbackEnabled ?? true),
                 skillDelivery: patch.skillDelivery === 'direct' || patch.skillDelivery === 'relay' ? patch.skillDelivery : base.skillDelivery,
                 hiddenPanels: patch.hiddenPanels === undefined ? base.hiddenPanels : sanitizeHiddenPanels(patch.hiddenPanels),
+                legendHidden: typeof patch.legendHidden === 'boolean' ? patch.legendHidden : (base.legendHidden ?? false),
                 rolePresets: patch.rolePresets === undefined ? (base.rolePresets ?? []) : sanitizeRolePresets(patch.rolePresets),
                 squads: patch.squads === undefined ? (base.squads ?? []) : sanitizeSquads(patch.squads),
               }
@@ -386,6 +390,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
                 feedbackEnabled: next.feedbackEnabled,
                 skillDelivery: next.skillDelivery,
                 hiddenPanels: next.hiddenPanels,
+                legendHidden: next.legendHidden ?? false,
                 rolePresets: next.rolePresets ?? [],
                 squads: next.squads ?? [],
               })
@@ -393,6 +398,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
             // 写入前先净化：坏数据不落库（schemastery 不会替我们拦）。
             const sanitized: Record<string, unknown> = { ...patch }
             if (patch.hiddenPanels !== undefined) sanitized.hiddenPanels = sanitizeHiddenPanels(patch.hiddenPanels)
+            if (patch.legendHidden !== undefined) sanitized.legendHidden = patch.legendHidden === true
             if (patch.rolePresets !== undefined) sanitized.rolePresets = sanitizeRolePresets(patch.rolePresets)
             if (patch.squads !== undefined) sanitized.squads = sanitizeSquads(patch.squads)
             await runtime.scope.update(sanitized)
@@ -407,6 +413,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               feedbackEnabled: next.feedbackEnabled ?? true,
               skillDelivery: next.skillDelivery === 'direct' ? 'direct' : 'relay',
               hiddenPanels: sanitizeHiddenPanels(next.hiddenPanels),
+              legendHidden: next.legendHidden === true,
               rolePresets: sanitizeRolePresets(next.rolePresets),
               squads: sanitizeSquads(next.squads),
             })

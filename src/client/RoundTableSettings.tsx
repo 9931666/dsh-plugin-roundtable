@@ -143,6 +143,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       feedbackEnabled: prefs.feedbackEnabled,
       skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
       hiddenPanels: Array.isArray(prefs.hiddenPanels) ? prefs.hiddenPanels : [],
+      legendHidden: prefs.legendHidden === true,
     })
       .then((result) => {
         setSaving(false)
@@ -476,6 +477,23 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
           })}
         </div>
         <div className={styles.hint}>{t('settingsPanelsHint')}</div>
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.field}>
+        <label className={styles.label}>{t('settingsLegend')}</label>
+        <label className={styles.switchRow}>
+          <input
+            type="checkbox"
+            className={styles.switchInput}
+            checked={prefs.legendHidden !== true}
+            onChange={(event) => patch({ legendHidden: !event.target.checked })}
+          />
+          <span className={styles.switchTrack} aria-hidden="true" />
+          <span className={styles.switchLabel}>
+            {prefs.legendHidden !== true ? t('settingsShowAllOn') : t('settingsShowAllOff')}
+          </span>
+        </label>
+        <div className={styles.hint}>{t('settingsLegendHint')}</div>
       </div>
       <div className={styles.sectionDivider} />
       <div className={styles.sectionTitle}>{t('settingsSkillTitle')}</div>

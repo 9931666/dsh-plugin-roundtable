@@ -275,6 +275,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [presetList, setPresetList] = useState<WireRolePreset[]>([])
   // B3+：阵容预设（一次加入多位专家）。同样是全局偏好，开会中途改设置即生效。
   const [squadList, setSquadList] = useState<WireRoleSquad[]>([])
+  // A1：画布图例的显示开关（全局偏好，默认显示）。图例上的叉号与设置页的开关
+  // 是同一份状态的两端 —— 关掉之后必须还能找回来，否则"删除"就变成了单向操作。
+  const [legendHidden, setLegendHidden] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
   const [kbPathInput, setKbPathInput] = useState('')
   const [kbListing, setKbListing] = useState<WireKbListing | null>(null)
@@ -344,7 +347,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // meeting in the workspace (on) or only meetings this conversation started.
   // `hiddenPanels` (R3) additionally picks which right-column panels show.
   useEffect(() => {
-    void rpc<{ showAllMeetings?: boolean; feedbackEnabled?: boolean; hiddenPanels?: string[]; rolePresets?: WireRolePreset[]; squads?: WireRoleSquad[] }>('roundtable/prefs.get', {})
+    void rpc<{ showAllMeetings?: boolean; feedbackEnabled?: boolean; hiddenPanels?: string[]; rolePresets?: WireRolePreset[]; squads?: WireRoleSquad[]; legendHidden?: boolean }>('roundtable/prefs.get', {})
       .then((result) => {
         if (result.ok) {
           if (typeof result.value?.showAllMeetings === 'boolean') setShowAll(result.value.showAllMeetings)
@@ -352,6 +355,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           if (Array.isArray(result.value?.hiddenPanels)) setHiddenPanels(result.value.hiddenPanels)
           if (Array.isArray(result.value?.rolePresets)) setPresetList(result.value.rolePresets)
           if (Array.isArray(result.value?.squads)) setSquadList(result.value.squads)
+          if (typeof result.value?.legendHidden === 'boolean') setLegendHidden(result.value.legendHidden)
         }
       })
       .catch(() => undefined)
@@ -898,6 +902,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       ? translate('legendRedteam')
       : translate('legendOrchestrated')
   const hasSyntheticEdges = meeting.edges.some((edge) => edge.id.startsWith('synthetic:'))
+  /** A1：关掉图例（写进全局偏好，刷新后依然是关的）。 */
+  const hideLegend = (): void => {
+    setLegendHidden(true)
+    void rpc<unknown>('roundtable/prefs.set', { legendHidden: true }).catch(() => undefined)
+  }
   const roundsPct = meeting.budget.maxRounds <= 0 ? 0
     : Math.min(100, (meeting.budget.usedRounds / meeting.budget.maxRounds) * 100)
   const tokensPct = meeting.budget.maxTokens <= 0 ? 0
@@ -1175,16 +1184,31 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             if (from === undefined || to === undefined) return null
             return <div key={message.id} className={styles.msgPulse} style={flowStyle(from, to)} />
           })}
-          <div className={styles.canvasLegend} data-rt-legend={meeting.mode}>
-            <div className={styles.canvasLegendTitle}>
-              {translate('legendTitle')} · {modeLabel}
+          {legendHidden ? null : (
+            <div className={styles.canvasLegend} data-rt-legend={meeting.mode}>
+              <button
+                type="button"
+                className={styles.canvasLegendClose}
+                title={translate('legendHide')}
+                aria-label={translate('legendHide')}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  hideLegend()
+                }}
+              >
+                ×
+              </button>
+              <div className={styles.canvasLegendTitle}>
+                {translate('legendTitle')} · {modeLabel}
+              </div>
+              <div className={styles.canvasLegendRow}>{modeLegend}</div>
+              {hasSyntheticEdges ? (
+                <div className={styles.canvasLegendRow}>{translate('legendSynthetic')}</div>
+              ) : null}
+              <div className={styles.canvasLegendHint}>{translate('legendPorts')}</div>
             </div>
-            <div className={styles.canvasLegendRow}>{modeLegend}</div>
-            {hasSyntheticEdges ? (
-              <div className={styles.canvasLegendRow}>{translate('legendSynthetic')}</div>
-            ) : null}
-            <div className={styles.canvasLegendHint}>{translate('legendPorts')}</div>
-          </div>
+          )}
           {toast !== null ? (
             <div className={styles.toast}>
               <span className={toast.kind === 'ok' ? styles.toastOk : styles.toastErr}>{toast.text}</span>
@@ -1248,7 +1272,10 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                   {queuedRemove ? (
                     <span className={styles.agentQueuedRemove}>{translate('managePendingRemove')}</span>
                   ) : (
-                    <span className={node.activity === 'running' ? styles.agentStatusWorking : removed ? styles.agentStatusRemoved : styles.agentStatus}>
+                    <span
+                      className={node.activity === 'running' ? styles.agentStatusWorking : removed ? styles.agentStatusRemoved : styles.agentStatus}
+                      title={translate('activityLifecycleHint')}
+                    >
                       {nodeStatusLabel(node, translate)}
                     </span>
                   )}

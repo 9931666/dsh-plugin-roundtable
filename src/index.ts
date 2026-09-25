@@ -105,6 +105,9 @@ const PreferenceSchema = z.object({
   skillDelivery: z.union(['relay', 'direct']).default('relay'),
   /** R3 右栏面板可见性：被列出的面板在拓扑页隐藏（空 = 全部显示）。 */
   hiddenPanels: z.array(z.string()).default([]),
+  /** A1：画布图例是否已被用户关闭（默认 false = 显示）。
+   *  与 hiddenPanels 同样带默认值的可选新增字段 —— 旧偏好对象不需迁移。 */
+  legendHidden: z.boolean().default(false),
   /** B3 用户自建角色预设：设置页维护，专家管理面板一键填充。
    *  刻意**不预置任何内置角色** —— 列表空着，等用户自己建。
    *  注意 schemastery 不强制 required，字段级校验在 rpc.ts 手写。 */
@@ -169,6 +172,7 @@ export function apply(ctx: Context, config: Config): void {
       feedbackEnabled: true,
       skillDelivery: 'relay',
       hiddenPanels: [],
+      legendHidden: false,
       rolePresets: [],
       squads: [],
     },

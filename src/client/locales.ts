@@ -35,6 +35,9 @@ export type RoundTableKey =
   | 'legendRedteam'
   | 'legendSynthetic'
   | 'legendPorts'
+  | 'legendHide'
+  | 'settingsLegend'
+  | 'settingsLegendHint'
   | 'settingsSquadTitle'
   | 'settingsSquadHint'
   | 'settingsSquadAdd'
@@ -246,11 +249,13 @@ export const zh: Record<RoundTableKey, string> = {
   edgeSetBidirectional: '设为双向通道',
   edgeRemove: '删除连线',
   activityRunning: '工作中',
-  activityIdle: '空闲（可续聊）',
-  activityReady: '就绪（可唤醒）',
+  // 画布节点只有 68px 宽：状态标签必须短到不换行（长语义走 activityLifecycleHint
+  // 的悬停提示），否则会像"就绪（可唤醒）"那样撑出卡片、文字错位。
+  activityIdle: '空闲',
+  activityReady: '就绪',
   activityRemoved: '已退出',
   activityUnspawned: '未唤醒',
-  activityMissing: '宿主已不认识',
+  activityMissing: '宿主失联',
   activityLifecycleHint: '专家是持久子代理：空闲与就绪都还能被再次唤醒，没有「已结束」这种状态。',
   legendTitle: '图例',
   legendOrchestrated: '主持人 → 专家：逐次派发；专家发言 → 汇聚网关',
@@ -258,6 +263,9 @@ export const zh: Record<RoundTableKey, string> = {
   legendRedteam: '专家 → 方案：只挑毛病，不提替代方案',
   legendSynthetic: '虚线 = 系统补的骨架通道，不是真实流转',
   legendPorts: '拖节点边缘的圆点可拉出连线；右键连线可改向或删除',
+  legendHide: '关闭图例（可在设置页重新打开）',
+  settingsLegend: '画布图例',
+  settingsLegendHint: '画布左上角的模式图例。关掉后画布更干净，随时可以在这里或图例上的叉号切换。',
   settingsSquadTitle: '阵容预设（一次套用多位专家）',
   settingsSquadHint: '阵容只回答「谁来开会」：它保存几位专家的 key、角色与模型。它不描述「会怎么开」——没有节点、没有连线、没有流程。',
   settingsSquadAdd: '新建阵容',
@@ -463,10 +471,12 @@ export const en: Record<RoundTableKey, string> = {
   edgeSetBidirectional: 'Set bidirectional',
   edgeRemove: 'Remove edge',
   activityRunning: 'working',
-  activityIdle: 'idle (resumable)',
-  activityReady: 'ready (resumable)',
+  // The canvas node is only 68px wide: keep these short enough not to wrap.
+  // The full semantics live in the activityLifecycleHint tooltip.
+  activityIdle: 'idle',
+  activityReady: 'ready',
   activityRemoved: 'removed',
-  activityUnspawned: 'not spawned',
+  activityUnspawned: 'unspawned',
   activityMissing: 'orphaned',
   activityLifecycleHint: 'Experts are durable subagents: idle and ready nodes can both be woken again — there is no "finished" state.',
   legendTitle: 'Legend',
@@ -475,6 +485,9 @@ export const en: Record<RoundTableKey, string> = {
   legendRedteam: 'Expert → plan: flaws only, no alternative proposals',
   legendSynthetic: 'Dashed = skeleton channels added by the system, not real traffic',
   legendPorts: 'Drag a dot on a node rim to wire an edge; right-click an edge to redirect or delete it',
+  legendHide: 'Hide the legend (turn it back on in settings)',
+  settingsLegend: 'Canvas legend',
+  settingsLegendHint: 'The mode legend in the canvas top-left corner. Hide it to keep the canvas clean; toggle it here or with the × on the legend itself.',
   settingsSquadTitle: 'Squad presets (fill several experts at once)',
   settingsSquadHint: 'A squad only answers "who joins": it stores the key, role and model of several experts. It says nothing about how the meeting runs — no nodes, no edges, no flow.',
   settingsSquadAdd: 'New squad',

@@ -220,13 +220,41 @@
   left: 12px;
   z-index: 3;
   max-width: 300px;
-  padding: 7px 10px;
+  /* 右侧留出叉号的位置，避免文字压到关闭按钮下面。 */
+  padding: 7px 24px 7px 10px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid rgba(128, 128, 128, 0.22);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   pointer-events: none;
   line-height: 1.5;
+}
+
+/* 关闭按钮：父级是 pointer-events:none（图例绝不能挡住拖拽拉线），
+   所以这里必须单独把事件收回来。 */
+.canvasLegendClose {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.canvasLegendClose:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.75);
 }
 
 .canvasLegendTitle {
@@ -494,11 +522,18 @@
 }
 
 /* A2：节点状态如实显示持久子代理的生命周期。默认中性灰（空闲/就绪/未唤醒
-   都不代表节点坏了），只有真的在跑才用绿色高亮。 */
+   都不代表节点坏了），只有真的在跑才用绿色高亮。
+   节点只有 68px 宽，所以这里强制单行 + 省略号：状态标签永远不能换行，
+   否则文字会溢出圆形卡片、和连线叠在一起（"就绪（可唤醒）"就是这么翻车的）。
+   完整语义交给 title（activityLifecycleHint）与右栏列表的悬停提示。 */
 .nodeMeta {
   font-size: 10px;
   color: rgba(0, 0, 0, 0.45);
   min-height: 12px;
+  max-width: calc(100% - 4px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nodeMetaWorking {
