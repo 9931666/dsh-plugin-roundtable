@@ -222,6 +222,22 @@ export interface WireRolePreset {
   model?: string
 }
 
+/** B3+ 阵容预设的一位成员（与 host `types.ts` 的 `RoleSquadMember` 对应）。
+ *  阵容只回答"请哪几位专家"，不描述会议怎么开。 */
+export interface WireRoleSquadMember {
+  key: string
+  role: string
+  provider?: string
+  model?: string
+}
+
+/** B3+ 阵容预设（一次套用多位专家）。 */
+export interface WireRoleSquad {
+  id: string
+  name: string
+  members: WireRoleSquadMember[]
+}
+
 export interface RoundTablePrefs {
   defaultMode: 'orchestrated' | 'egalitarian' | 'redteam'
   maxRounds: number
@@ -240,6 +256,8 @@ export interface RoundTablePrefs {
   hiddenPanels: string[]
   /** B3：用户自建角色预设（全局；不预置内置角色）。 */
   rolePresets: WireRolePreset[]
+  /** B3+：用户自建阵容预设（全局；不预置内置阵容）。 */
+  squads: WireRoleSquad[]
 }
 
 /**

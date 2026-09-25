@@ -26,7 +26,7 @@ import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join } from 'node:path'
-import type { EdgeDirection, FeedbackEntry, RolePreset, UserAction } from './types.ts'
+import type { EdgeDirection, FeedbackEntry, RolePreset, RoleSquad, RoleSquadMember, UserAction } from './types.ts'
 import { interruptNodeByParent } from './members.ts'
 import {
   appendFeedback,
@@ -70,6 +70,8 @@ export interface RoundTablePreferences {
   readonly hiddenPanels: string[]
   /** B3：用户自建角色预设（全局偏好；不预置任何内置角色）。 */
   readonly rolePresets: RolePreset[]
+  /** B3+：用户自建阵容预设（一次套用多位专家；同样不预置）。 */
+  readonly squads: RoleSquad[]
 }
 
 /** 右栏可隐藏的面板 id（客户端与服务端共用的稳定标识）。 */
@@ -135,6 +137,68 @@ export function sanitizeRolePresets(value: unknown): RolePreset[] {
       role,
       ...(routed ? { provider, model } : {}),
     })
+  }
+  return out
+}
+
+/** 阵容预设的硬上限（客户端与服务端共用；服务端截断，客户端提前拦截）。 */
+export const SQUAD_MAX = 20
+export const SQUAD_MEMBER_MAX = 8
+const SQUAD_ID_MAX = 64
+const SQUAD_NAME_MAX = 40
+const SQUAD_MEMBER_ROLE_MAX = 400
+
+/** 阵容成员 key 的净化规则：与客户端 `sanitizeKey` 同源
+ *  （小写、保留中日韩、非法字符折成 '-'、去首尾）。 */
+function sanitizeSquadKey(value: unknown): string {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return raw.replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+/**
+ * 把任意输入收敛成合法的阵容预设清单（B3+）。
+ *
+ * 与 {@link sanitizeRolePresets} 同一套路（schemastery 不校验 required，
+ * 条目级校验只能手写），差别只有两条：
+ *   - 成员的**去重键是 key**（同一阵容里不能有两位同名专家）；
+ *   - **没有任何成员的阵容被丢弃** —— 否则设置页会出现一条点了没反应的条目。
+ *
+ * 兼容性（这一条就是"结构变更必须自带迁移"的落地方式）：`squads` 是
+ * **可选新增字段**，旧偏好对象里没有它时读到的是 `[]`，读侧归一化、
+ * 只有用户真的保存时才写回，因此不需要版本号迁移，也不可能损坏已有数据。
+ */
+export function sanitizeSquads(value: unknown): RoleSquad[] {
+  if (!Array.isArray(value)) return []
+  const out: RoleSquad[] = []
+  const seenIds = new Set<string>()
+  for (const item of value) {
+    if (out.length >= SQUAD_MAX) break
+    if (item === null || typeof item !== 'object') continue
+    const raw = item as { id?: unknown; name?: unknown; members?: unknown }
+    const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, SQUAD_NAME_MAX) : ''
+    if (name === '') continue
+    const members: RoleSquadMember[] = []
+    const seenKeys = new Set<string>()
+    if (Array.isArray(raw.members)) {
+      for (const entry of raw.members) {
+        if (members.length >= SQUAD_MEMBER_MAX) break
+        if (entry === null || typeof entry !== 'object') continue
+        const member = entry as { key?: unknown; role?: unknown; provider?: unknown; model?: unknown }
+        const key = sanitizeSquadKey(member.key)
+        if (key === '' || seenKeys.has(key)) continue
+        seenKeys.add(key)
+        const role = typeof member.role === 'string' ? member.role.trim().slice(0, SQUAD_MEMBER_ROLE_MAX) : ''
+        const provider = typeof member.provider === 'string' ? member.provider.trim() : ''
+        const model = typeof member.model === 'string' ? member.model.trim() : ''
+        const routed = provider !== '' && model !== ''
+        members.push({ key, role, ...(routed ? { provider, model } : {}) })
+      }
+    }
+    if (members.length === 0) continue
+    const candidate = typeof raw.id === 'string' ? raw.id.trim().slice(0, SQUAD_ID_MAX) : ''
+    const id = candidate === '' || seenIds.has(candidate) ? randomUUID() : candidate
+    seenIds.add(id)
+    out.push({ id, name, members })
   }
   return out
 }
@@ -283,6 +347,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
               hiddenPanels: sanitizeHiddenPanels(prefs.hiddenPanels),
               rolePresets: sanitizeRolePresets(prefs.rolePresets),
+              squads: sanitizeSquads(prefs.squads),
             })
           }
           case 'roundtable/prefs.set': {
@@ -308,6 +373,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
                 skillDelivery: patch.skillDelivery === 'direct' || patch.skillDelivery === 'relay' ? patch.skillDelivery : base.skillDelivery,
                 hiddenPanels: patch.hiddenPanels === undefined ? base.hiddenPanels : sanitizeHiddenPanels(patch.hiddenPanels),
                 rolePresets: patch.rolePresets === undefined ? (base.rolePresets ?? []) : sanitizeRolePresets(patch.rolePresets),
+                squads: patch.squads === undefined ? (base.squads ?? []) : sanitizeSquads(patch.squads),
               }
               runtime.fallbackPrefs = next
               return ok<RoundTablePreferences>({
@@ -321,12 +387,14 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
                 skillDelivery: next.skillDelivery,
                 hiddenPanels: next.hiddenPanels,
                 rolePresets: next.rolePresets ?? [],
+                squads: next.squads ?? [],
               })
             }
             // 写入前先净化：坏数据不落库（schemastery 不会替我们拦）。
             const sanitized: Record<string, unknown> = { ...patch }
             if (patch.hiddenPanels !== undefined) sanitized.hiddenPanels = sanitizeHiddenPanels(patch.hiddenPanels)
             if (patch.rolePresets !== undefined) sanitized.rolePresets = sanitizeRolePresets(patch.rolePresets)
+            if (patch.squads !== undefined) sanitized.squads = sanitizeSquads(patch.squads)
             await runtime.scope.update(sanitized)
             const next = runtime.scope.get()
             return ok<RoundTablePreferences>({
@@ -340,6 +408,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               skillDelivery: next.skillDelivery === 'direct' ? 'direct' : 'relay',
               hiddenPanels: sanitizeHiddenPanels(next.hiddenPanels),
               rolePresets: sanitizeRolePresets(next.rolePresets),
+              squads: sanitizeSquads(next.squads),
             })
           }
           case 'roundtable/edge.set': {

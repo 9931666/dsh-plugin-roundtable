@@ -165,6 +165,38 @@ export interface RolePreset {
   model?: string
 }
 
+/** 阵容预设里的一位成员（B3+）。
+ *
+ *  与 {@link RolePreset} 的分工：预设描述"一位专家该怎么配"，阵容描述
+ *  "这一场请哪几位专家"。阵容**刻意不描述会议怎么开** —— 没有节点顺序、
+ *  没有连线、没有依赖与分支。这条边界是被红队评审认定过的（gpt-2：模板与
+ *  角色预设的边界未定义），所以在这里用类型直接钉死，避免"阵容"演化成
+ *  又一个会议模板。 */
+export interface RoleSquadMember {
+  /** 专家 key（进会议后的节点标识，规则同节点的 key）。 */
+  key: string
+  /** 角色说明，写入节点的 role；可为空。 */
+  role: string
+  /** 可选 LLM provider 路由；必须与 model 同时给出才生效。空 = 继承主持人。 */
+  provider?: string
+  /** 可选模型名；空 = 继承主持人。 */
+  model?: string
+}
+
+/** 用户自建的阵容预设（B3+）：一次把多位专家排进 user-actions 队列。
+ *
+ *  链路与手填完全一致 —— 套用阵容就是逐位提交 `add-node` user-action，
+ *  主持人下一轮照常 `roundtable_add_node`。因此它不需要任何新链路，
+ *  也不改变会议的运行时语义。 */
+export interface RoleSquad {
+  /** 稳定 id（新建时生成；编辑与删除都按 id 定位）。 */
+  id: string
+  /** 阵容名称，如"方案评审三人组"。 */
+  name: string
+  /** 成员清单（至少一位）。 */
+  members: RoleSquadMember[]
+}
+
 /** 知识库摘要缓存（C2）的一条条目。
  *
  *  失效键 = `path + size + mtimeMs`：任一变化即视为失效。宿主

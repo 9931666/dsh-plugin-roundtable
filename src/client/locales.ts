@@ -26,6 +26,39 @@ export type RoundTableKey =
   | 'activityIdle'
   | 'activityReady'
   | 'activityRemoved'
+  | 'activityUnspawned'
+  | 'activityMissing'
+  | 'activityLifecycleHint'
+  | 'legendTitle'
+  | 'legendOrchestrated'
+  | 'legendEgalitarian'
+  | 'legendRedteam'
+  | 'legendSynthetic'
+  | 'legendPorts'
+  | 'settingsSquadTitle'
+  | 'settingsSquadHint'
+  | 'settingsSquadAdd'
+  | 'settingsSquadEmpty'
+  | 'settingsSquadName'
+  | 'settingsSquadNamePlaceholder'
+  | 'settingsSquadMembers'
+  | 'settingsSquadMemberKey'
+  | 'settingsSquadMemberKeyPlaceholder'
+  | 'settingsSquadAddMember'
+  | 'settingsSquadRemoveMember'
+  | 'settingsSquadSave'
+  | 'settingsSquadCancel'
+  | 'settingsSquadInvalid'
+  | 'settingsSquadLimit'
+  | 'settingsSquadUpdated'
+  | 'settingsSquadEdit'
+  | 'settingsSquadDelete'
+  | 'settingsSquadMemberCount'
+  | 'manageSquadLabel'
+  | 'manageSquadPlaceholder'
+  | 'manageSquadEmpty'
+  | 'manageSquadAdded'
+  | 'manageSquadSkipped'
   | 'settingsNav'
   | 'settingsDefaultMode'
   | 'settingsDefaultModeHint'
@@ -213,9 +246,42 @@ export const zh: Record<RoundTableKey, string> = {
   edgeSetBidirectional: '设为双向通道',
   edgeRemove: '删除连线',
   activityRunning: '工作中',
-  activityIdle: '空闲',
-  activityReady: '待唤醒',
+  activityIdle: '空闲（可续聊）',
+  activityReady: '就绪（可唤醒）',
   activityRemoved: '已退出',
+  activityUnspawned: '未唤醒',
+  activityMissing: '宿主已不认识',
+  activityLifecycleHint: '专家是持久子代理：空闲与就绪都还能被再次唤醒，没有「已结束」这种状态。',
+  legendTitle: '图例',
+  legendOrchestrated: '主持人 → 专家：逐次派发；专家发言 → 汇聚网关',
+  legendEgalitarian: '专家 ↔ 专家：直达互辩（超预算自动闭麦）',
+  legendRedteam: '专家 → 方案：只挑毛病，不提替代方案',
+  legendSynthetic: '虚线 = 系统补的骨架通道，不是真实流转',
+  legendPorts: '拖节点边缘的圆点可拉出连线；右键连线可改向或删除',
+  settingsSquadTitle: '阵容预设（一次套用多位专家）',
+  settingsSquadHint: '阵容只回答「谁来开会」：它保存几位专家的 key、角色与模型。它不描述「会怎么开」——没有节点、没有连线、没有流程。',
+  settingsSquadAdd: '新建阵容',
+  settingsSquadEmpty: '（暂无阵容预设）',
+  settingsSquadName: '阵容名称',
+  settingsSquadNamePlaceholder: '如「方案评审三人组」',
+  settingsSquadMembers: '成员',
+  settingsSquadMemberKey: '专家 key',
+  settingsSquadMemberKeyPlaceholder: '如 architect',
+  settingsSquadAddMember: '＋ 加一位成员',
+  settingsSquadRemoveMember: '移除',
+  settingsSquadSave: '保存阵容',
+  settingsSquadCancel: '取消',
+  settingsSquadInvalid: '阵容名称与每位成员的 key 都不能为空',
+  settingsSquadLimit: '最多 {max} 个阵容，每个阵容最多 {members} 位成员',
+  settingsSquadUpdated: '阵容已保存',
+  settingsSquadEdit: '编辑',
+  settingsSquadDelete: '删除',
+  settingsSquadMemberCount: '{count} 位成员',
+  manageSquadLabel: '阵容（一次加入多位专家）',
+  manageSquadPlaceholder: '选择阵容…',
+  manageSquadEmpty: '（设置页还没有阵容预设）',
+  manageSquadAdded: '已排入 {count} 位专家，主持人下一轮加入',
+  manageSquadSkipped: '（{names} 已存在，跳过）',
   settingsNav: '圆桌会议',
   settingsDefaultMode: '默认协作模式',
   settingsDefaultModeHint: '主持人统筹：一切经由主持人转达；多模型平等：专家互相直达辩论，超预算自动闭麦（选择它会弹出安全限制）。',
@@ -397,9 +463,42 @@ export const en: Record<RoundTableKey, string> = {
   edgeSetBidirectional: 'Set bidirectional',
   edgeRemove: 'Remove edge',
   activityRunning: 'working',
-  activityIdle: 'idle',
-  activityReady: 'ready',
+  activityIdle: 'idle (resumable)',
+  activityReady: 'ready (resumable)',
   activityRemoved: 'removed',
+  activityUnspawned: 'not spawned',
+  activityMissing: 'orphaned',
+  activityLifecycleHint: 'Experts are durable subagents: idle and ready nodes can both be woken again — there is no "finished" state.',
+  legendTitle: 'Legend',
+  legendOrchestrated: 'Captain → expert: dispatched one by one; contributions → gateway',
+  legendEgalitarian: 'Expert ↔ expert: direct debate (auto-muted once the budget runs out)',
+  legendRedteam: 'Expert → plan: flaws only, no alternative proposals',
+  legendSynthetic: 'Dashed = skeleton channels added by the system, not real traffic',
+  legendPorts: 'Drag a dot on a node rim to wire an edge; right-click an edge to redirect or delete it',
+  settingsSquadTitle: 'Squad presets (fill several experts at once)',
+  settingsSquadHint: 'A squad only answers "who joins": it stores the key, role and model of several experts. It says nothing about how the meeting runs — no nodes, no edges, no flow.',
+  settingsSquadAdd: 'New squad',
+  settingsSquadEmpty: '(no squads yet)',
+  settingsSquadName: 'Squad name',
+  settingsSquadNamePlaceholder: 'e.g. "three-reviewer panel"',
+  settingsSquadMembers: 'Members',
+  settingsSquadMemberKey: 'Expert key',
+  settingsSquadMemberKeyPlaceholder: 'e.g. architect',
+  settingsSquadAddMember: '+ Add a member',
+  settingsSquadRemoveMember: 'Remove',
+  settingsSquadSave: 'Save squad',
+  settingsSquadCancel: 'Cancel',
+  settingsSquadInvalid: 'The squad name and every member key are required',
+  settingsSquadLimit: 'Up to {max} squads, {members} members each',
+  settingsSquadUpdated: 'Squad saved',
+  settingsSquadEdit: 'Edit',
+  settingsSquadDelete: 'Delete',
+  settingsSquadMemberCount: '{count} member(s)',
+  manageSquadLabel: 'Squad (add several experts at once)',
+  manageSquadPlaceholder: 'Pick a squad…',
+  manageSquadEmpty: '(no squads in settings yet)',
+  manageSquadAdded: 'Queued {count} expert(s); the captain adds them next round',
+  manageSquadSkipped: '({names} already exist — skipped)',
   settingsNav: 'RoundTable',
   settingsDefaultMode: 'Default collaboration mode',
   settingsDefaultModeHint: 'Orchestrated: the captain relays everything. Egalitarian: experts debate each other directly and the budget mutes the meeting when exceeded (a warning asks for safety limits).',

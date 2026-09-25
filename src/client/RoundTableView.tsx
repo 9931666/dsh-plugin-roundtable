@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-client-connection/client'
-import type { RpcCaller, WireEdge, WireKbListing, WireMeeting, WireNode, WireProviderOption, WireRolePreset } from './wire.ts'
+import type { RpcCaller, WireEdge, WireKbListing, WireMeeting, WireNode, WireProviderOption, WireRolePreset, WireRoleSquad } from './wire.ts'
 import { fetchMeetings } from './wire.ts'
 import { BRAND_LOGOS } from './brand-logos.generated.ts'
 import styles from './RoundTableView.module.css'
@@ -198,10 +198,20 @@ function edgeCurveGeometry(
   return { x1, y1, x2, y2, cx, cy, path, mx, my }
 }
 
+/**
+ * A2：节点状态如实反映「持久子代理」的生命周期，而不是自造一个执行状态机。
+ *
+ * 宿主侧 `reconcileNodeLiveness()` 只产出 running / idle / ready（外加
+ * unspawned 与 removed）——**没有 done / failed**，因为子代理跑完一轮回到
+ * idle 之后仍可被再次唤醒。这里逐值如实翻译；未知值一律落到"就绪"，
+ * 绝不显示"已完成 / 已失败"这种会让用户以为节点已经死掉的说法。
+ */
 function nodeStatusLabel(node: WireNode, translate: (key: string) => string): string {
   if (node.status === 'removed' || node.activity === 'removed') return translate('activityRemoved')
   if (node.activity === 'running') return translate('activityRunning')
   if (node.activity === 'idle') return translate('activityIdle')
+  if (node.activity === 'unspawned') return translate('activityUnspawned')
+  if (node.activity === 'missing') return translate('activityMissing')
   return translate('activityReady')
 }
 
@@ -263,6 +273,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [form, setForm] = useState<{ name: string; role: string; provider: string; model: string }>({ name: '', role: '', provider: '', model: '' })
   // B3：设置页维护的角色预设（只读镜像，用于"选中即填充"）。
   const [presetList, setPresetList] = useState<WireRolePreset[]>([])
+  // B3+：阵容预设（一次加入多位专家）。同样是全局偏好，开会中途改设置即生效。
+  const [squadList, setSquadList] = useState<WireRoleSquad[]>([])
   const [kbOpen, setKbOpen] = useState(false)
   const [kbPathInput, setKbPathInput] = useState('')
   const [kbListing, setKbListing] = useState<WireKbListing | null>(null)
@@ -332,13 +344,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // meeting in the workspace (on) or only meetings this conversation started.
   // `hiddenPanels` (R3) additionally picks which right-column panels show.
   useEffect(() => {
-    void rpc<{ showAllMeetings?: boolean; feedbackEnabled?: boolean; hiddenPanels?: string[]; rolePresets?: WireRolePreset[] }>('roundtable/prefs.get', {})
+    void rpc<{ showAllMeetings?: boolean; feedbackEnabled?: boolean; hiddenPanels?: string[]; rolePresets?: WireRolePreset[]; squads?: WireRoleSquad[] }>('roundtable/prefs.get', {})
       .then((result) => {
         if (result.ok) {
           if (typeof result.value?.showAllMeetings === 'boolean') setShowAll(result.value.showAllMeetings)
           if (typeof result.value?.feedbackEnabled === 'boolean') setFeedbackEnabled(result.value.feedbackEnabled)
           if (Array.isArray(result.value?.hiddenPanels)) setHiddenPanels(result.value.hiddenPanels)
           if (Array.isArray(result.value?.rolePresets)) setPresetList(result.value.rolePresets)
+          if (Array.isArray(result.value?.squads)) setSquadList(result.value.squads)
         }
       })
       .catch(() => undefined)
@@ -803,6 +816,63 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }))
   }
 
+  /**
+   * B3+：套用一个阵容 —— 把成员逐位排进 `add-node` 队列。
+   *
+   * 与手填走**完全相同**的链路（user-action → 主持人下一轮
+   * `roundtable_add_node`），因此不需要新 RPC，也不改变会议运行时语义。
+   * 已存在或已在队列里的 key 会被跳过**并如实告知**，不静默覆盖。
+   */
+  const applySquad = (id: string): void => {
+    const squad = squadList.find((candidate) => candidate.id === id)
+    if (squad === undefined || meeting === undefined) return
+    const meetingId = meeting.id
+    const taken = new Set(meeting.nodes.filter((node) => node.status !== 'removed').map((node) => node.key))
+    const queued: typeof squad.members = []
+    const skipped: string[] = []
+    for (const member of squad.members) {
+      if (taken.has(member.key) || pendingAddKeys.has(member.key)) {
+        skipped.push(member.key)
+        continue
+      }
+      taken.add(member.key)
+      queued.push(member)
+    }
+    if (queued.length === 0) {
+      setToast({ kind: 'err', text: translate('manageNameTaken').replace('{name}', skipped.join('、')) })
+      return
+    }
+    void Promise.all(queued.map((member) => {
+      const provider = member.provider ?? ''
+      const model = member.model ?? ''
+      const text = `新增了专家 ${member.key}${member.role !== '' ? `（角色：${member.role}）` : ''}${provider !== '' ? `，模型 ${provider}/${model}` : '，使用主持人默认模型'}（来自阵容「${squad.name}」）`
+      return rpc<unknown>('roundtable/user-actions.append', {
+        meetingId,
+        kind: 'add-node',
+        nodeKey: member.key,
+        role: member.role,
+        provider,
+        model,
+        text,
+      })
+    }))
+      .then((results) => {
+        if (results.some((result) => !result.ok)) {
+          setToast({ kind: 'err', text: translate('manageQueueFailed') })
+        } else {
+          const base = translate('manageSquadAdded').replace('{count}', String(queued.length))
+          setToast({
+            kind: 'ok',
+            text: skipped.length === 0
+              ? base
+              : `${base}${translate('manageSquadSkipped').replace('{names}', skipped.join('、'))}`,
+          })
+        }
+        void refresh()
+      })
+      .catch(() => setToast({ kind: 'err', text: translate('manageQueueFailed') }))
+  }
+
   if (meeting === undefined) {
     return (
       <div className={styles.emptyState}>
@@ -818,6 +888,16 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     : meeting.mode === 'redteam'
       ? translate('modeRedteam')
       : translate('modeOrchestrated')
+  // A1：图例把「这张图在当前模式下该怎么读」写在画布上。
+  // 起因（红队评审 gpt-1 / claude-2）：同一张通道图在三种模式下含义完全不同，
+  // 不写清楚，用户会把它当成一张"控制流程的路径图"来读。
+  // 这里只描述现有语义，不引入任何执行/蓝图概念。
+  const modeLegend = meeting.mode === 'egalitarian'
+    ? translate('legendEgalitarian')
+    : meeting.mode === 'redteam'
+      ? translate('legendRedteam')
+      : translate('legendOrchestrated')
+  const hasSyntheticEdges = meeting.edges.some((edge) => edge.id.startsWith('synthetic:'))
   const roundsPct = meeting.budget.maxRounds <= 0 ? 0
     : Math.min(100, (meeting.budget.usedRounds / meeting.budget.maxRounds) * 100)
   const tokensPct = meeting.budget.maxTokens <= 0 ? 0
@@ -943,9 +1023,15 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       >
         {brand !== null ? brandAvatar(brand, 'node') : null}
         <div className={styles.nodeLabel}>{label}</div>
-        {kind === 'node' ? (
-          <div className={styles.nodeMeta}>
-            {node?.activity === 'running' ? translate('activityRunning') : ''}
+        {kind === 'node' && node !== undefined ? (
+          <div
+            className={[
+              styles.nodeMeta,
+              node.activity === 'running' ? styles.nodeMetaWorking : '',
+            ].filter(Boolean).join(' ')}
+            title={translate('activityLifecycleHint')}
+          >
+            {removed ? '' : nodeStatusLabel(node, translate)}
           </div>
         ) : null}
         {/* Connection ports: a small hit-dot on each side of the node, like a
@@ -1089,6 +1175,16 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             if (from === undefined || to === undefined) return null
             return <div key={message.id} className={styles.msgPulse} style={flowStyle(from, to)} />
           })}
+          <div className={styles.canvasLegend} data-rt-legend={meeting.mode}>
+            <div className={styles.canvasLegendTitle}>
+              {translate('legendTitle')} · {modeLabel}
+            </div>
+            <div className={styles.canvasLegendRow}>{modeLegend}</div>
+            {hasSyntheticEdges ? (
+              <div className={styles.canvasLegendRow}>{translate('legendSynthetic')}</div>
+            ) : null}
+            <div className={styles.canvasLegendHint}>{translate('legendPorts')}</div>
+          </div>
           {toast !== null ? (
             <div className={styles.toast}>
               <span className={toast.kind === 'ok' ? styles.toastOk : styles.toastErr}>{toast.text}</span>
@@ -1457,6 +1553,25 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                         </option>
                       )
                     })}
+                  </select>
+                )}
+              </div>
+              <div className={styles.manageFormRow}>
+                <label className={styles.manageLabel}>{translate('manageSquadLabel')}</label>
+                {squadList.length === 0 ? (
+                  <div className={styles.manageHint}>{translate('manageSquadEmpty')}</div>
+                ) : (
+                  <select
+                    className={styles.manageSelect}
+                    value=""
+                    onChange={(event) => applySquad(event.target.value)}
+                  >
+                    <option value="">{translate('manageSquadPlaceholder')}</option>
+                    {squadList.map((squad) => (
+                      <option key={squad.id} value={squad.id}>
+                        {squad.name} · {squad.members.map((member) => member.key).join('、')}
+                      </option>
+                    ))}
                   </select>
                 )}
               </div>

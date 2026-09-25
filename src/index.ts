@@ -115,6 +115,20 @@ const PreferenceSchema = z.object({
     provider: z.string(),
     model: z.string(),
   })).default([]),
+  /** B3+ 用户自建阵容预设：一次把多位专家排进待加入队列。
+   *  与角色预设同样**不预置内置阵容**；条目级校验在 rpc.ts 手写
+   *  （schemastery 不强制 required）。新增字段是可选且带默认值，
+   *  因此旧偏好对象无需版本迁移即可读。 */
+  squads: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    members: z.array(z.object({
+      key: z.string(),
+      role: z.string(),
+      provider: z.string(),
+      model: z.string(),
+    })),
+  })).default([]),
 })
 
 // 主持人 usage 段已迁往 prompt.ts（纯文本模块，体积可被测试断言）。
@@ -156,6 +170,7 @@ export function apply(ctx: Context, config: Config): void {
       skillDelivery: 'relay',
       hiddenPanels: [],
       rolePresets: [],
+      squads: [],
     },
   }
 

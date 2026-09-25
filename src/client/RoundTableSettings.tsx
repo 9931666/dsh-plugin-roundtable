@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import type { RpcCaller, RoundTablePrefs, WireFeedbackEntry, WireProviderOption, WireRolePreset } from './wire.ts'
+import type { RpcCaller, RoundTablePrefs, WireFeedbackEntry, WireProviderOption, WireRolePreset, WireRoleSquad } from './wire.ts'
 import styles from './RoundTableSettings.module.css'
 
 export interface RoundTableSettingsInjected {
@@ -38,6 +38,11 @@ const PANEL_KEYS: ReadonlyArray<{ id: string; labelKey: string }> = [
  *  （客户端提前拦截，服务端仍然会截断，两层都有）。 */
 const ROLE_PRESET_LIMIT = 50
 
+/** B3+：阵容条数与成员数上限，与 host `rpc.ts` 的 `SQUAD_MAX` /
+ *  `SQUAD_MEMBER_MAX` 保持一致（客户端提前拦截，服务端仍然会截断）。 */
+const SQUAD_LIMIT = 20
+const SQUAD_MEMBER_LIMIT = 8
+
 export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element {
   const { rpc, t } = props
   const [prefs, setPrefs] = useState<RoundTablePrefs | null>(null)
@@ -59,6 +64,14 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
     model: '',
   })
   const [presetNotice, setPresetNotice] = useState<'saved' | 'failed' | 'invalid' | 'limit' | null>(null)
+  // B3+ 阵容预设：与角色预设同一套做法，只是每条含多位成员。
+  const [squadFormOpen, setSquadFormOpen] = useState(false)
+  const [editingSquadId, setEditingSquadId] = useState<string | null>(null)
+  const [squadDraft, setSquadDraft] = useState<{ name: string; members: Array<{ key: string; role: string; provider: string; model: string }> }>({
+    name: '',
+    members: [{ key: '', role: '', provider: '', model: '' }],
+  })
+  const [squadNotice, setSquadNotice] = useState<'saved' | 'failed' | 'invalid' | 'limit' | null>(null)
 
   // 模型下拉复用与专家管理同一份主机模型目录。
   useEffect(() => {
@@ -248,6 +261,123 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
     if (editingPresetId === id) closePresetForm()
   }
 
+  /* ---------------- B3+：阵容预设（一次套用多位专家） ----------------
+   *
+   * 阵容只回答「谁来开会」：它是若干位专家的 key + 角色 + 模型。
+   * 它**不描述会议怎么开** —— 没有节点顺序、没有连线、没有分支，因此与
+   * 「会议模板 / 流程图」是两个概念（红队评审 gpt-2 认定过的边界）。
+   * 套用时只是逐位提交 `add-node` user-action，链路与手填完全一致。 */
+
+  const emptySquadMember = (): { key: string; role: string; provider: string; model: string } =>
+    ({ key: '', role: '', provider: '', model: '' })
+
+  /** 写入整份偏好（含新的 squads）；理由同 {@link persistPresets}。 */
+  const persistSquads = (next: WireRoleSquad[]): void => {
+    if (prefs === null) return
+    const full: RoundTablePrefs = { ...prefs, squads: next }
+    setPrefs(full)
+    void rpc<RoundTablePrefs>('roundtable/prefs.set', { ...full })
+      .then((result) => {
+        if (result.ok) {
+          setPrefs(result.value)
+          setSquadNotice('saved')
+        } else {
+          setSquadNotice('failed')
+        }
+      })
+      .catch(() => setSquadNotice('failed'))
+  }
+
+  const openSquadForm = (squad?: WireRoleSquad): void => {
+    setSquadNotice(null)
+    if (squad === undefined) {
+      setEditingSquadId(null)
+      setSquadDraft({ name: '', members: [emptySquadMember()] })
+    } else {
+      setEditingSquadId(squad.id)
+      setSquadDraft({
+        name: squad.name,
+        members: squad.members.length === 0
+          ? [emptySquadMember()]
+          : squad.members.map((member) => ({
+            key: member.key,
+            role: member.role,
+            provider: member.provider ?? '',
+            model: member.model ?? '',
+          })),
+      })
+    }
+    setSquadFormOpen(true)
+  }
+
+  const closeSquadForm = (): void => {
+    setSquadFormOpen(false)
+    setEditingSquadId(null)
+    setSquadDraft({ name: '', members: [emptySquadMember()] })
+  }
+
+  const patchSquadMember = (
+    index: number,
+    next: Partial<{ key: string; role: string; provider: string; model: string }>,
+  ): void => {
+    setSquadDraft((previous) => ({
+      ...previous,
+      members: previous.members.map((member, position) => (position === index ? { ...member, ...next } : member)),
+    }))
+  }
+
+  const addSquadMember = (): void => {
+    setSquadDraft((previous) => previous.members.length >= SQUAD_MEMBER_LIMIT
+      ? previous
+      : { ...previous, members: [...previous.members, emptySquadMember()] })
+  }
+
+  const removeSquadMember = (index: number): void => {
+    setSquadDraft((previous) => previous.members.length <= 1
+      ? previous
+      : { ...previous, members: previous.members.filter((_, position) => position !== index) })
+  }
+
+  const submitSquad = (): void => {
+    if (prefs === null) return
+    const name = squadDraft.name.trim()
+    const members = squadDraft.members.map((member) => ({ ...member, key: member.key.trim().toLowerCase() }))
+    // 任何一位成员的 key 为空即整体不通过：静默丢成员会让"三人阵容"变成两人。
+    if (name === '' || members.some((member) => member.key === '')) {
+      setSquadNotice('invalid')
+      return
+    }
+    const current = Array.isArray(prefs.squads) ? prefs.squads : []
+    if (editingSquadId === null && current.length >= SQUAD_LIMIT) {
+      setSquadNotice('limit')
+      return
+    }
+    const entry: WireRoleSquad = {
+      id: editingSquadId ?? newPresetId(),
+      name,
+      members: members.map((member) => {
+        const routed = member.provider !== '' && member.model !== ''
+        return {
+          key: member.key,
+          role: member.role.trim(),
+          ...(routed ? { provider: member.provider, model: member.model } : {}),
+        }
+      }),
+    }
+    const next = editingSquadId === null
+      ? [...current, entry]
+      : current.map((squad) => (squad.id === editingSquadId ? entry : squad))
+    persistSquads(next)
+    closeSquadForm()
+  }
+
+  const deleteSquad = (id: string): void => {
+    if (prefs === null) return
+    const current = Array.isArray(prefs.squads) ? prefs.squads : []
+    persistSquads(current.filter((squad) => squad.id !== id))
+    if (editingSquadId === id) closeSquadForm()
+  }
+
   const formatTs = (ts: number): string => {
     try {
       const date = new Date(ts)
@@ -263,6 +393,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
   }
 
   const presets = Array.isArray(prefs.rolePresets) ? prefs.rolePresets : []
+  const squads = Array.isArray(prefs.squads) ? prefs.squads : []
 
   return (
     <div className={styles.root}>
@@ -462,6 +593,136 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         {presetNotice === 'invalid' ? <span className={styles.failed}>{t('settingsPresetInvalid')}</span> : null}
         {presetNotice === 'limit' ? (
           <span className={styles.failed}>{t('settingsPresetLimit').replace('{max}', String(ROLE_PRESET_LIMIT))}</span>
+        ) : null}
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.sectionTitle}>{t('settingsSquadTitle')}</div>
+      <div className={styles.field}>
+        <div className={styles.hint}>{t('settingsSquadHint')}</div>
+        {squads.length === 0 ? (
+          <div className={styles.note}>{t('settingsSquadEmpty')}</div>
+        ) : (
+          <div className={styles.presetList}>
+            {squads.map((squad) => (
+              <div key={squad.id} className={styles.presetItem}>
+                <div className={styles.presetInfo}>
+                  <div className={styles.presetName}>{squad.name}</div>
+                  <div className={styles.presetMeta}>
+                    {squad.members
+                      .map((member) => (member.provider !== undefined && member.provider !== '' && member.model !== undefined && member.model !== ''
+                        ? `${member.key}（${member.provider}/${member.model}）`
+                        : member.key))
+                      .join(' · ')}
+                  </div>
+                  <div className={styles.presetRoute}>
+                    {t('settingsSquadMemberCount').replace('{count}', String(squad.members.length))}
+                  </div>
+                </div>
+                <div className={styles.presetActions}>
+                  <button type="button" className={styles.presetBtn} onClick={() => openSquadForm(squad)}>
+                    {t('settingsSquadEdit')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.presetBtn} ${styles.presetDeleteBtn}`}
+                    onClick={() => deleteSquad(squad.id)}
+                  >
+                    {t('settingsSquadDelete')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {squadFormOpen ? (
+          <div className={styles.presetForm}>
+            <div className={styles.presetFormRow}>
+              <label className={styles.label}>{t('settingsSquadName')}</label>
+              <input
+                className={styles.input}
+                value={squadDraft.name}
+                placeholder={t('settingsSquadNamePlaceholder')}
+                onChange={(event) => setSquadDraft((previous) => ({ ...previous, name: event.target.value }))}
+              />
+            </div>
+            <div className={styles.presetFormRow}>
+              <label className={styles.label}>{t('settingsSquadMembers')}</label>
+              {squadDraft.members.map((member, index) => (
+                <div key={`squad-member-${index}`} className={styles.squadMemberRow}>
+                  <input
+                    className={styles.presetSelect}
+                    value={member.key}
+                    placeholder={t('settingsSquadMemberKeyPlaceholder')}
+                    aria-label={t('settingsSquadMemberKey')}
+                    onChange={(event) => patchSquadMember(index, { key: event.target.value })}
+                  />
+                  <input
+                    className={styles.presetSelect}
+                    value={member.role}
+                    placeholder={t('settingsPresetRolePlaceholder')}
+                    onChange={(event) => patchSquadMember(index, { role: event.target.value })}
+                  />
+                  <select
+                    className={styles.presetSelect}
+                    value={member.provider}
+                    onChange={(event) => patchSquadMember(index, { provider: event.target.value, model: '' })}
+                  >
+                    <option value="">{t('manageModelInherit')}</option>
+                    {providers.map((provider) => (
+                      <option key={provider.id} value={provider.id}>{provider.name || provider.id}</option>
+                    ))}
+                  </select>
+                  <select
+                    className={styles.presetSelect}
+                    value={member.model}
+                    disabled={member.provider === ''}
+                    onChange={(event) => patchSquadMember(index, { model: event.target.value })}
+                  >
+                    <option value="">{t('manageModelInherit')}</option>
+                    {(providers.find((provider) => provider.id === member.provider)?.models ?? []).map((model) => (
+                      <option key={model.id} value={model.id}>{model.name || model.id}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className={`${styles.presetBtn} ${styles.presetDeleteBtn}`}
+                    disabled={squadDraft.members.length <= 1}
+                    onClick={() => removeSquadMember(index)}
+                  >
+                    {t('settingsSquadRemoveMember')}
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className={styles.presetCancelBtn}
+                disabled={squadDraft.members.length >= SQUAD_MEMBER_LIMIT}
+                onClick={addSquadMember}
+              >
+                {t('settingsSquadAddMember')}
+              </button>
+            </div>
+            <div className={styles.presetFormActions}>
+              <button type="button" className={styles.presetAddBtn} onClick={submitSquad}>
+                {t('settingsSquadSave')}
+              </button>
+              <button type="button" className={styles.presetCancelBtn} onClick={closeSquadForm}>
+                {t('settingsSquadCancel')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className={styles.presetAddBtn} onClick={() => openSquadForm()}>
+            + {t('settingsSquadAdd')}
+          </button>
+        )}
+        {squadNotice === 'saved' ? <span className={styles.saved}>{t('settingsSquadUpdated')}</span> : null}
+        {squadNotice === 'failed' ? <span className={styles.failed}>{t('settingsSaveFailed')}</span> : null}
+        {squadNotice === 'invalid' ? <span className={styles.failed}>{t('settingsSquadInvalid')}</span> : null}
+        {squadNotice === 'limit' ? (
+          <span className={styles.failed}>
+            {t('settingsSquadLimit').replace('{max}', String(SQUAD_LIMIT)).replace('{members}', String(SQUAD_MEMBER_LIMIT))}
+          </span>
         ) : null}
       </div>
       <div className={styles.sectionDivider} />

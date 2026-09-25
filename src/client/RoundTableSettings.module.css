@@ -393,3 +393,19 @@
 .presetCancelBtn:hover {
   background: rgba(0, 0, 0, 0.04);
 }
+
+/* ---------- B3+：阵容预设的成员行 ----------
+   一行 = 专家 key + 角色 + provider + model + 移除。窄屏折行，避免把
+   设置页撑出横向滚动条。 */
+
+.squadMemberRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.squadMemberRow .presetSelect {
+  flex: 1 1 120px;
+  min-width: 0;
+}

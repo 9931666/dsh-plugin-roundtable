@@ -207,6 +207,46 @@
   overflow: hidden;
 }
 
+/* A1 图例：把「这张图在当前模式下该怎么读」直接写在画布上。
+   起因是红队评审的两条认定缺陷（gpt-1 / claude-2）：同一张通道图在
+   主持人统筹 / 多模型平等 / 针锋相对三种模式下含义完全不同，不写清楚，
+   用户会把它读成一张"控制流程的路径图"。
+   pointer-events:none —— 它只是说明文字，绝不能挡住节点的拖拽拉线。
+   位置放左上角：主持人节点锚在左侧垂直居中（x≈10% w, y=50% h），
+   右上是连线最稀疏的区域。 */
+.canvasLegend {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 3;
+  max-width: 300px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(128, 128, 128, 0.22);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+  line-height: 1.5;
+}
+
+.canvasLegendTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.62);
+  margin-bottom: 2px;
+}
+
+.canvasLegendRow {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.canvasLegendHint {
+  font-size: 10.5px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-top: 2px;
+}
+
 .edgeLayer {
   position: absolute;
   inset: 0;
@@ -453,10 +493,16 @@
   line-height: 1;
 }
 
+/* A2：节点状态如实显示持久子代理的生命周期。默认中性灰（空闲/就绪/未唤醒
+   都不代表节点坏了），只有真的在跑才用绿色高亮。 */
 .nodeMeta {
   font-size: 10px;
-  color: #10a37f;
+  color: rgba(0, 0, 0, 0.45);
   min-height: 12px;
+}
+
+.nodeMetaWorking {
+  color: #10a37f;
 }
 
 /* A node that was added then removed: keep it visible so the topology still
