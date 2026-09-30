@@ -11,28 +11,51 @@
 
 | 项 | 值 | 核对日期 |
 | --- | --- | --- |
-| 本机运行的 DSH | **0.1.5-rc.3** | 2026-09-24 |
-| 插件 devDependencies | **0.1.5-rc.3**（已对齐） | 2026-09-24 |
-| 插件 peerDependencies | ^0.1.5-rc.1（覆盖 rc.3） | — |
-| `src/version.ts` 的 `HARNESS_RANGE` | `DeepSeek Harness 0.1.5-rc.3+` | 2026-09-24 |
-| 插件版本 | **1.0.0-rc.1** | 2026-09-24 |
+| 本机运行的 DSH | **0.2.0-rc.2** | 2026-09-30 |
+| 插件 devDependencies | **0.2.0-rc.2**（已对齐） | 2026-09-30 |
+| 插件 peerDependencies | `^0.2.0-rc.2`（只覆盖 0.2 线） | 2026-09-30 |
+| `src/version.ts` 的 `HARNESS_RANGE` | `DeepSeek Harness 0.2.0-rc.2+` | 2026-09-30 |
+| 插件版本 | **1.0.0-rc.2** | 2026-09-30 |
 | 矩阵来源 | `compatibility.json`（`recommendedHost`） | — |
-| 可执行校验 | `pnpm compatibility`（45 项） | — |
+| 可执行校验 | `pnpm compatibility`（43 项） | — |
 
-### ✅ rc.3 体检结论（2026-09-24，已完成）
+### ✅ 0.2.0-rc.2 体检结论（2026-09-30，已完成）
+
+**这是一次跨大版本升级（0.1.5-rc.3 → 0.2.0-rc.2），两处真破坏，都已修。**
+
+| # | 宿主改了什么 | 编译期症状 | 应对 |
+| --- | --- | --- | --- |
+| ① | `settings` 服务重构成 `SettingsForms`：`SettingsScope` 类型消失，插件**不再能注册自己的配置命名空间** | `Property 'register' does not exist on type 'SettingsForms'`；`has no exported member 'SettingsScope'` | 新增 `src/preferences.ts`，偏好改为**自持久化**（`<DSH_HOME>/roundtable/preferences.json`）；`settings` 从三处能力清单同步移除 |
+| ② | `MessageSourceMap` 移除 catch-all 的 `plugin` kind，改为「每个生产者在自己的模块里 `declare module` 声明」 | `Type '"plugin"' is not assignable to type '"user" \| "model" \| "tool" \| …'` | `src/members.ts` 自声明 `roundtable` kind，而非退化成匿名 `user` |
+
+**最值钱的一条结论：破坏面比预期小得多。** 宿主侧 `tsc` 只有 **4 个错误**、
+浏览器侧 **0 个**。`inject` 的四个必需服务、子代理派发与中断、两个生命周期事件、
+`webServer.register`、`connection.rpc.handle` 的两参签名与 disposer 形状、
+三个界面槽位 —— **全部原样可用**。逐项复核见
+`src/harness-compat.ts` 文末「6. 宿主契约变更实录」。
+
+> ⚠️ **本轮只做了静态核对**（类型检查 + 逐项 API 形状核对 + 三项门禁），
+> **没有跑活体冒烟**（`/plugins/dsh-plugin-roundtable/state` 与关键 RPC）。
+> 换新宿主后第一次实跑会议时，请把结果回写到这里。
+
+**当前状态**：`tsc` 0 错误（宿主 + 浏览器）/ `node --test` **150 通过** /
+`compatibility` 43 通过 / `verify:package` 19 通过 / `release` 10 通过 /
+`doctor` 混装 ✓ · cordis 同一性 ✓。
+
+<details>
+<summary>历史：0.1.5-rc.3 体检结论（2026-09-24）</summary>
 
 **旧漂移已修复。** 此前 17 个 devDependencies 停在 rc.2，而宿主已是 rc.3 ——
 `pnpm compatibility` 上线后当场报出 19 项失败，现已全部对齐。
-
-**体检中发现的两个真实问题（都已修）**：
 
 | 问题 | 根因 | 结论 |
 | --- | --- | --- |
 | 对 rc.3 类型跑 `tsc` 出现 60+ 处 `Property 'subagents' does not exist on type 'Context'` | **不是 API 破坏**：宿主与插件各带一份 `@deepseek-ai/cordis@4.0.2`，TypeScript 视为两个模块 → `declare module` 声明合并失效 | 统一为同一物理副本后 **0 错误**。见 §6 |
 | `lib/client.js.map` 被一起发布（557 kB，占解包体积 36%） | 浏览器半体是宿主直接加载的 bundle，默认不会去取 `.map` | sourcemap 改为按需（`RT_SOURCEMAP=1`），发布包降到 ~405 kB |
 
-**当前状态**：`tsc` 0 错误 / `node --test` 132 通过 / `compatibility` 45 通过 /
+当时状态：`tsc` 0 错误 / `node --test` 132 通过 / `compatibility` 45 通过 /
 `verify:package` 19 通过 / `release` 9 通过。
+</details>
 
 ---
 
@@ -42,35 +65,39 @@
 
 ### 1.1 宿主服务
 
-| 服务 | 干什么用 | 怎么访问 | 源码证据 | 失效时用户看到什么 | rc.3 |
+| 服务 | 干什么用 | 怎么访问 | 源码证据 | 失效时用户看到什么 | 0.2.0-rc.2 |
 | --- | --- | --- | --- | --- | --- |
 | `subagents` | 派发/中断专家子代理 | `ctx.inject` **必需** | `src/index.ts` | 整个插件消失 → 圆桌会议 tab 与设置页都没了，**且没有任何报错** | ✅已验 |
 | `agents` | 中断子代理（父 Agent 离线时的兜底） | `ctx.inject` **必需** | `src/tools.ts` / `rpc.ts` | 同上（load-gating） | ✅已验 |
 | `tools` | 注册 `roundtable_*` 工具 | `ctx.inject` **必需** | `src/tools.ts` | 同上（load-gating） | ✅已验 |
 | `systemPrompt` | 注入《全局协作总纲》 | `ctx.inject` **必需** | `src/index.ts` | 同上（load-gating） | ✅已验 |
-| `settings` | 偏好持久化（`settings.yaml` 的 roundtable 命名空间） | `ctx.inject` | `src/index.ts:251` | 设置页「读取设置失败」；偏好退回内存态，重启即丢 | ✅已验 |
-| `connection` | ① web 路由认证栅栏 ② RPC 兜底传输 | `ctx.get` **可选** | `src/index.ts:285` / `rpc.ts:653` | 栅栏缺失 → 路由可被本机任意网页命中（安全缺口）；通道缺失 → 主传输仍可用 | ✅已验 |
-| `llm` | 专家管理下拉的 provider/model 清单；评审观点拆分 | `ctx.get` **可选** | `rpc.ts:471` / `tools.ts:1372` | 专家管理里选不了模型（只在派发时继承主持人） | ✅已验 |
+| `connection` | ① web 路由认证栅栏 ② RPC 兜底传输 | `ctx.get` **可选** | `src/index.ts` / `rpc.ts` | 栅栏缺失 → 路由可被本机任意网页命中（安全缺口）；通道缺失 → 主传输仍可用 | ✅已验 |
+| `llm` | 专家管理下拉的 provider/model 清单；评审观点拆分 | `ctx.get` **可选** | `rpc.ts` / `tools.ts:1372` | 专家管理里选不了模型（只在派发时继承主持人） | ✅已验 |
 | `skills` | skill 清单与正文（relay 模式） | `ctx.get` **可选** | `src/skills.ts:44` | 会议卡片的「技能」区空白，不报错 | ✅已验 |
 | `sessionProjections` | provider 上报的真实 token 用量 | `ctx.get` **可选** | `src/token-usage.ts:110` | 预算里只显示"发言文本估算"，真实用量恒为 0 | ✅已验 |
 | `userQuestions` | 专家向用户提问 / 人类决策 | `ctx.get` **可选** | `tools.ts:548` / `tools.ts:1029` | 「需人类决策」卡片弹不出来，会议停在那不动 | ✅已验 |
 
 > **为什么 `inject` 和 `ctx.get` 必须分开看**：`inject` 是**加载门禁**——列进去的服务缺一个，整个插件停在 `PENDING`，界面静默消失。`ctx.get` 是可选的——缺了只降级。
 > 这条区别是 v0.2.36 那次事故的根因，**永远不要把可选能力写进 `inject`**。
+>
+> **0.2.0-rc.2 起 `settings` 已从本表移除**：该服务被重构成 `SettingsForms`，
+> 插件不再能注册自己的配置命名空间（`SettingsScope` 类型已删除）。偏好改为
+> `src/preferences.ts` 的自持久化 —— 顺带的好处是这条路径上**没有任何宿主能力
+> 可缺**，旧实现里"设置页读不出来 / 偏好退回内存态"的降级分支不再存在。
 
 ### 1.2 宿主事件
 
-| 事件 | 干什么用 | 源码证据 | 失效时用户看到什么 | rc.3 |
+| 事件 | 干什么用 | 源码证据 | 失效时用户看到什么 | 0.2.0-rc.2 |
 | --- | --- | --- | --- | --- |
 | `subagent/end` | 专家产出自动落盘（即使它没主动 `speak`），并读 `stopReason` 写 `lastError` | `src/node-events.ts:206` | 专家跑完了但会议记录里什么都没有；`review.json` 永久停在 `reviewing` | ✅已验 |
 | `agent/request-error` | 捕获 provider 失败原因（余额/鉴权/模型名写错） | `src/node-events.ts:209` | 专家失败只显示 `removed` 墓碑，没有原因 | ✅已验 |
-| `internal/service` | 探测服务注册（当前逻辑待确认） | `src/index.ts:377` | 待补 | ✅已验 |
+| `internal/service` | 探测服务注册（当前逻辑待确认） | `src/index.ts` | 待补 | ✅已验 |
 
 > ⚠️ `agent/request-error` 是 **waterfall** 事件：监听器必须始终 `next()` 委派，否则会吞掉宿主自己的重试/恢复策略。改这个监听器时要格外小心。
 
 ### 1.3 前端（浏览器半体）
 
-| 触点 | 干什么用 | 源码证据 | 失效时用户看到什么 | rc.3 |
+| 触点 | 干什么用 | 源码证据 | 失效时用户看到什么 | 0.2.0-rc.2 |
 | --- | --- | --- | --- | --- |
 | `slots` | 注册三个界面入口 | `inject = ['slots','locale']` | 三个入口全都不注册 | ✅已验 |
 | `locale` | 中英文案（`ctx.locale.register` / `bind`） | `src/client/index.ts:56` | 界面显示原始 key（如 `roundtable.tab`） | ✅已验 |
@@ -86,16 +113,16 @@
 
 ### 1.4 传输与路由
 
-| 触点 | 干什么用 | 源码证据 | 失效时用户看到什么 | rc.3 |
+| 触点 | 干什么用 | 源码证据 | 失效时用户看到什么 | 0.2.0-rc.2 |
 | --- | --- | --- | --- | --- |
-| `connection.rpc.handle(channel, handler)` | 注册 `/roundtable` RPC 通道 | `src/rpc.ts:653` | 兜底通道失效（主传输是 web 路由，仍可用） | ✅已验 |
+| `connection.rpc.handle(channel, handler)` | 注册 `/roundtable` RPC 通道 | `src/rpc.ts` | 兜底通道失效（主传输是 web 路由，仍可用） | ✅已验 |
 | `webServer` 路由 | `/plugins/dsh-plugin-roundtable/state` 与 `/rpc` | `src/index.ts` | 界面一直转圈、读不到任何会议 | ✅已验 |
 | `connection.requestRejection()` | web 路由认证栅栏 | `src/web-guard.ts` | 安全缺口：本机任意网页可命中插件路由 | ✅已验 |
 | `connection.rpc.handle` 返回值 | 期望 `disposer` | `src/rpc.ts` | 插件卸载时通道不释放（泄漏） | ✅已验 |
 
 ### 1.5 编译期依赖（**本插件最脆的一环**）
 
-| 依赖 | 为什么要 type-only import | 失效时用户看到什么 | rc.3 |
+| 依赖 | 为什么要 type-only import | 失效时用户看到什么 | 0.2.0-rc.2 |
 | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-client-ui-conversation/client` | 拉 `conversation.view` 的 SlotMap 合并 | 类型报错（编译期），或槽名写错导致页签不出现 | ✅已验 |
 | `@deepseek-ai/dsh-client-ui-settings/client` | 拉 `settings.section` 的 SlotMap 合并 | 同上 | ✅已验 |
@@ -118,18 +145,23 @@
 7. **活体冒烟**：跑一遍 `/plugins/dsh-plugin-roundtable/state` + 几个关键 RPC（见下）。
 8. **回写**：把这一轮的结论、新发现的触点、新的失效征兆**写回本文件**。这一步不做，文档会在两个版本内失效。
 
-### 基线（2026-09-20 实测）
+### 基线（2026-09-30 实测，宿主 0.2.0-rc.2）
 
 | 项 | 结果 |
 | --- | --- |
-| `tsc`（宿主 + 浏览器，**对 rc.3**） | **通过，0 错误**（`pnpm typecheck`） |
-| `node --test` | **132/132 通过，0 失败**（15 个测试文件） |
-| `pnpm compatibility` | **45/45 通过** |
-| `pnpm verify:package` | **19/19 通过**（22 个宿主侧模块全部在产物里有痕迹） |
-| `pnpm release` | **9/9 通过**，候选产物已出 SHA-256 |
-| `pnpm doctor` | 宿主 0.1.5-rc.3；混装 ✓；cordis 同一性 ✓ |
-| `npm run build` | 通过 |
-| 活体 RPC 冒烟 | `state` 200；`prefs.get`、`models.list`、`kb.list`、`feedback.list`、`user-actions.list`、`edge.add/remove`、`prefs.set` 全部 `ok:true` |
+| `tsc`（宿主 + 浏览器，**对 0.2.0-rc.2**） | **通过，0 错误**（`pnpm typecheck`） |
+| `node --test --test-isolation=none "test/*.test.mjs"` | **150/150 通过，0 失败** |
+| `pnpm compatibility` | **43/43 通过**（比上轮少 2 项 = `settings` 能力与其探测点已移除） |
+| `pnpm verify:package` | **19/19 通过**（24 个宿主侧模块全部在产物里有痕迹） |
+| `pnpm release` | **10/10 通过**，候选产物 425,405 B，SHA-256 已出 |
+| `pnpm doctor` | 宿主 0.2.0-rc.2；混装 ✓；cordis 同一性 ✓ |
+| `pnpm build` | 通过（`lib/index.js` 186.7 kB / `lib/client.js` 564.3 kB） |
+| 活体 RPC 冒烟 | ⏳ **本轮未做**（纯静态核对，见第 0 节的提醒） |
+
+**上一轮基线（宿主 0.1.5-rc.3，2026-09-20）**：`tsc` 0 错误 / `node --test` 132 通过 /
+`compatibility` 45 通过 / `verify:package` 19 通过 / `release` 9 通过；活体冒烟
+`state` 200，`prefs.get`、`models.list`、`kb.list`、`feedback.list`、
+`user-actions.list`、`edge.add/remove`、`prefs.set` 全部 `ok:true`。
 
 ---
 
@@ -137,35 +169,41 @@
 
 | 项 | 状态 | 影响 |
 | --- | --- | --- |
-| ~~rc.3 契约未逐项验证~~ | ✅ **已完成** | 见第 0 节体检结论；`tsc` 0 错误、四项门禁全绿 |
-| ~~17 个 devDependencies 停在 rc.2~~ | ✅ **已修复** | 已对齐 rc.3，`pnpm compatibility` 强制 |
+| ~~0.2.0-rc.2 契约未逐项验证~~ | ✅ **已完成（静态）** | 见第 0 节体检结论；`tsc` 双端 0 错误、五项门禁全绿 |
+| ~~`settings` 服务重构导致插件无法注册命名空间~~ | ✅ **已修复** | 偏好改为 `src/preferences.ts` 自持久化；能力清单同步移除 |
+| ~~`MessageSourceMap` 移除 catch-all 的 `plugin` kind~~ | ✅ **已修复** | `src/members.ts` 自声明 `roundtable` kind |
 | ~~cordis 混装导致声明合并失效~~ | ✅ **已修复** | 见 §6；`pnpm doctor` 会主动告警 |
-| `internal/service` 监听的实际用途 | **未确认** | `src/index.ts`（原 377 行，迁移后行号已变） |
-| ~~`meeting.json` 无 schema 版本~~ | ✅ **已修复** | 见 §5：已补 `schemaVersion` + 迁移通道 |
+| **活体冒烟未做** | **待补** | 换宿主后第一次实跑会议时应把结果回写到这里 |
+| **`pnpm-lock.yaml` 未刷新** | **待补** | 仍是 0.1.5-rc.3 时代的记录；本机无法重生成（pwsh 沙箱禁写工作区 + pnpm store 数据库损坏）。普通 `pnpm install` 会自动按新 `package.json` 刷新，CI 不跑安装 |
+| `internal/service` 监听的实际用途 | **未确认** | `src/index.ts`（行号随本轮改动已变） |
 | 前端测试覆盖 | **无** | `RoundTableView.tsx` 1,723 行零测试；需要先把纯逻辑抽出来 |
-| npm 发布 | **尚未发布** | 本次为首次发布（`1.0.0-rc.1` → `next` 渠道） |
-| rspec 之外的宿主未验证 | 已知边界 | 矩阵目前只有 `0.1.5-rc.3`；`0.1.6-alpha.*` 未纳入 |
-| `pnpm install` 在本机不可用 | 环境问题 | pnpm store 数据库打不开；`node_modules` 是手工对齐的 |
+| 只支持 0.2 线 | 已知边界 | 矩阵只有 `0.2.0-rc.2`；`0.1.5-rc.3` 不再承诺，`0.1.6-alpha.*` 从未纳入 |
+| `pnpm install` 在本机不可用 | 环境问题 | pnpm store 数据库打不开；`node_modules` 是手工对齐的（junction 指向宿主副本） |
 
 ---
 
 ## 4. 版本升级固定动作（每次 DSH 更新后照做）
 
-1. `pnpm doctor` —— 先看**混装**与 **cordis 同一性**，排除环境问题；
+1. `pnpm doctor` —— 先看**混装**与 **cordis 同一性**，排除环境问题
+   （这条在 0.2.0-rc.2 那轮依然救场：类型报错的典型原因仍是混装，不是 API 破坏）；
 2. 改 `compatibility.json` 的 `recommendedHost` 与 `package.json` 的
    `roundtable.hostBaseline`；
-3. 同步 `devDependencies` 到该版本并安装；
-4. `pnpm typecheck && pnpm test`；
-5. `pnpm compatibility && pnpm verify:package`；
-6. 重建 `lib/`；**宿主半体（`inject` / 事件 / RPC）的改动必须重启 DSH**；
-7. 把本轮的结论、新发现的触点、新的失效征兆**写回本文件**——不做这一步，
-   文档会在两个版本内失效。
+3. 同步 `devDependencies` / `peerDependencies` 到该版本并安装；
+4. `pnpm typecheck && pnpm test` —— **把每个宿主侧错误当成契约变更来读**，
+   别急着补类型签名：先分清是「形状变了」还是「能力没了」，后者要换实现；
+5. `pnpm compatibility && pnpm verify:package && pnpm release`；
+6. **重建 `lib/`**（`pnpm build`）；**宿主半体（`inject` / 事件 / RPC / 偏好存储）
+   的改动必须重启 DSH**；
+7. **活体冒烟**：`/plugins/dsh-plugin-roundtable/state` + `prefs.get/set` 等关键 RPC，
+   并实跑一场短会；
+8. 把本轮的结论、新触点、新失效征兆写回第 0 节与 §6 —— 不做这一步，文档会在
+   两个版本内失效。
 
 ### 本清单由谁补完
 
 | 部分 | 负责 | 状态 |
 | --- | --- | --- |
-| 触点提取、证据路径、rc.3 漂移 | 从源码抽取 | ✅ 已完成 |
+| 触点提取、证据路径、版本漂移 | 从源码抽取 | ✅ 已完成 |
 | **"失效时用户看到什么"** | **作者（只有你知道真实症状）** | ⏳ **待补** |
 | 每轮体检结论回写 | 作者 | 每次升级后 |
 
@@ -187,6 +225,14 @@
 | `review.json` | `ReviewRecord.schemaVersion` | `normalizeReview()` | **1** |
 | `transcript.jsonl` | 无（append-only，不需要） | — | — |
 | `kb-digest.json` | 无（缓存，坏了就重建） | — | — |
+| `preferences.json`（v1.0.0-rc.2 新增，位于 `<DSH_HOME>/roundtable/`） | 无（**逐字段归一化**，缺字段补默认） | `normalizePreferences(layer, base)` | 不适用（见下） |
+
+> **偏好为什么不用版本号迁移**：它是一张"每个字段都有默认值"的扁平表，而
+> `normalizePreferences(layer, base)` 的语义就是「只覆盖出现过的字段、其余沿用
+> 基准」——旧文件缺新字段时自动补默认，用户真的保存时才写回。这比维护一条
+> 迁移链更简单，且不可能因为漏写迁移而读坏数据（`src/preferences.ts`）。
+> 该文件**不在会议状态目录下**，所以不参与 `withMeetingLock` 的会议级串行化；
+> 它由 `PreferenceStore` 内部串行化自己的写入。
 
 ### 改数据形状时的固定动作
 
@@ -212,8 +258,8 @@
 
 ## 6. cordis 实例同一性（本插件最隐蔽的一条约束）
 
-**rc.3 体检里最值钱的发现**：把所有依赖对齐到 rc.3 后第一次跑 `tsc`，出现
-**60+ 处**这样的错误：
+**rc.3 体检里最值钱的发现**（0.2.0-rc.2 那轮再次复核，仍是通过）：
+把所有依赖对齐到 rc.3 后第一次跑 `tsc`，出现 **60+ 处**这样的错误：
 
 ```
 error TS2339: Property 'subagents' does not exist on type 'Context'
@@ -225,13 +271,24 @@ error TS2345: Argument of type '"subagent/end"' is not assignable to parameter o
 
 | 位置 | 解析到的 cordis |
 | --- | --- |
-| 宿主 `dsh-subagent` 的 `declare module '@deepseek-ai/cordis'` | `<宿主>/node_modules/@deepseek-ai/cordis` |
-| 插件源码 `import type { Context } from '@deepseek-ai/cordis'` | `<插件>/node_modules/.pnpm/@deepseek-ai+cordis@4.0.2/...` |
+| 宿主 `dsh-subagent` 的 `declare module '@deepseek-ai/cordis'` | `<宿主>/node_modules/@deepseek-ai/cordis`（0.2.0-rc.2 时是 **4.0.4**） |
+| 插件源码 `import type { Context } from '@deepseek-ai/cordis'` | `<插件>/node_modules/.pnpm/@deepseek-ai+cordis@<版本>/...` |
 
-两个**不同物理目录**的 `4.0.2`，TypeScript 视为两个不同模块 →
+两个**不同物理目录**的同版本 cordis，TypeScript 视为两个不同模块 →
 同名 `interface Context` 的**声明合并失效** → 宿主服务全部"不存在"。
 
 把插件的 `@deepseek-ai/cordis` 指向宿主那一份（同一物理路径）后，`tsc` **0 错误**。
+
+> **0.2.0-rc.2 轮次的实际做法**：`node_modules/@deepseek-ai/cordis` 是一个
+> **junction**，直接指向 `<宿主>/node_modules/@deepseek-ai/cordis`，而不是 pnpm
+> store 里的副本。于是宿主升级时插件自动拿到同一物理目录 —— 这也解释了为什么
+> 本轮只报 4 个错误而不是几十个：**同一性从一开始就是对的**。
+> 唯一的代价是 `pnpm install` 会把它改回 store 解析，所以每次重装后都要跑
+> `pnpm doctor` 复核一次。
+>
+> ⚠️ **同一个坑对 `declare module '@deepseek-ai/dsh-llm'` 同样成立**：
+> `src/members.ts` 自声明的 `roundtable` kind 也是声明合并，一旦 dsh-llm 出现
+> 两份物理副本，那个声明会静默失效（`source: { kind: 'roundtable' }` 变成类型错误）。
 
 ### 判定与修复
 

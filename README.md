@@ -5,8 +5,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
-  <img src="https://img.shields.io/badge/version-v1.0.0--rc.1-blue" alt="v1.0.0-rc.1">
-  <img src="https://img.shields.io/badge/host-0.1.5--rc.3-202724" alt="Harness 0.1.5-rc.3">
+  <img src="https://img.shields.io/badge/version-v1.0.0--rc.2-blue" alt="v1.0.0-rc.2">
+  <img src="https://img.shields.io/badge/host-0.2.0--rc.2-202724" alt="Harness 0.2.0-rc.2">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
 
@@ -102,7 +102,15 @@
 ## 安装（一分钟）
 
 > [!NOTE]
-> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.1.5-rc.2+**；v0.2.36 按 0.1.5-rc.2 宿主复核（对应 `@deepseek-ai/*` 0.1.5-rc.2 包），v0.2.31 起按 0.1.5-rc.1 复核，v0.2.1 起即适配 Cordis 4.0.2 / dsh 客户端架构，不再兼容 0.1.1-rc.2）。宿主 `alpha` 线的 0.1.6-alpha.2 尚未适配。
+> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.2.0-rc.2+**）。
+>
+> **v1.0.0-rc.2 是宿主适配版。** 宿主 `0.2.0-rc.2` 动了两处真正破坏兼容的地方：
+> ① `settings` 服务被重构成 `SettingsForms`（插件不再能注册自己的配置命名空间，
+> `SettingsScope` 类型消失）→ 本插件的偏好持久化改为**自管**
+> （`<DSH_HOME>/roundtable/preferences.json`）；② `MessageSourceMap` 移除了
+> catch-all 的 `plugin` kind（改为「每个生产者在自己的模块里声明」）→ 本插件
+> 自声明 `roundtable` kind。**0.1.5-rc.3 及更早的宿主不再受支持**（peer 区间与
+> 类型基线各只能有一个版本）。详见 [`release-notes/v1.0.0-rc.2.md`](release-notes/v1.0.0-rc.2.md)。
 
 > [!IMPORTANT]
 > **本插件不发布到 npm。** 作者因**个人原因无法注册 npm 账户**（拿不到 `@huanlin` scope），
@@ -121,7 +129,11 @@ dsh plugin --profile web add .
 
 装完**重启 DSH**（关窗口 → 重新启动）→ 刷新 Web UI → 设置 → 圆桌会议能读出默认值即可。
 
-**从 0.1.1-rc.2 / 旧版升级**：宿主必须先升到 0.1.5-rc.1+；直接装 v0.2.31 覆盖旧插件，重启 DSH。历史会议记录（`.roundtable/`）跨大版本兼容性不保证，重要会议先导出。
+**从旧版升级**：宿主必须先升到 **0.2.0-rc.2**；然后 `git pull && pnpm install && pnpm build`，重启 DSH。历史会议记录（`.roundtable/`）本版数据格式未变，可直接沿用；从更早版本（0.1.x 宿主时代）跨上来的会议建议先导出留档。
+
+> ⚠️ **偏好位置变了**：从宿主 `settings.yaml` 的 `roundtable` 命名空间搬到
+> `<DSH_HOME>/roundtable/preferences.json`。旧命名空间里的值**不会自动迁移**，
+> 到「设置 → 圆桌会议」重设一次即可（不设也能用，默认值与旧版一致）。
 
 ### 更新到最新版
 
@@ -173,7 +185,7 @@ git pull && pnpm build
     promptSectionOrder: 116      # 使用策略提示段顺序
 ```
 
-运行时偏好（默认模式与预算默认值、专家回答限制）在「设置 → 圆桌会议」中修改，持久化到 `settings.yaml`：
+运行时偏好（默认模式与预算默认值、专家回答限制）在「设置 → 圆桌会议」中修改，持久化到 **`<DSH_HOME>/roundtable/preferences.json`**（插件自管 —— 宿主 `0.2.0-rc.2` 起 `settings` 服务不再接受插件注册配置命名空间，见 [`release-notes/v1.0.0-rc.2.md`](release-notes/v1.0.0-rc.2.md)）：
 
 | 偏好 | 默认 | 说明 |
 | --- | --- | --- |

@@ -7,10 +7,13 @@
  * > Keep version-specific shapes here: **API presence alone is not a promise of
  * > support for future versions.**
  *
- * 我们的宿主是 **rc 线**（0.1.5-rc.2 → rc.3 → 0.1.6-alpha.*），API 尚未冻结，
- * 破坏性变更属于常态。所以在写任何 `ctx.get(...)` / `ctx.on(...)` / 服务方法
- * 调用之前，先问一句：**这个形状在别的 rc 上还成立吗？** 如果答案需要翻源码，
- * 那它就应该写进本文件，而不是散进业务代码。
+ * 我们的宿主是 **rc 线**（0.1.5-rc.2 → rc.3 → **0.2.0-rc.2**；`0.1.6-alpha.*`
+ * 是另一条未纳入的线），API 尚未冻结，破坏性变更属于常态 —— 0.2.0-rc.2 一轮
+ * 就动了两处真正破坏兼容的地方。所以在写任何 `ctx.get(...)` / `ctx.on(...)` /
+ * 服务方法调用之前，先问一句：**这个形状在别的 rc 上还成立吗？** 如果答案需要翻
+ * 源码，那它就应该写进本文件，而不是散进业务代码。
+ *
+ * 每轮升级的实测结论记在文末「6. 宿主契约变更实录」—— 那是本文件最值钱的部分。
  *
  * 两条铁律：
  *   1. **探测绝不成为新的加载门禁**。这里没有 `inject`、没有静态导入宿主包，
@@ -45,7 +48,6 @@ export const OPTIONAL_CAPABILITIES = [
   'connection',
   'llm',
   'skills',
-  'settings',
   'userQuestions',
   'sessionProjections',
   'webServer',
@@ -102,13 +104,6 @@ export const CAPABILITY_SPECS: readonly CapabilitySpec[] = [
     purpose: '把《全局协作总纲》与使用协议注入系统提示',
     whenMissing: '同 tools：插件 fiber 停在 PENDING',
     evidence: 'inject 加载门禁',
-  },
-  {
-    id: 'settings',
-    kind: 'optional',
-    purpose: '偏好持久化（settings.yaml 的 roundtable 命名空间）',
-    whenMissing: '设置页读不出来；偏好退回内存态，重启即丢',
-    evidence: 'ctx.inject([\'settings\']) 回调内 try/catch 已兜底',
   },
   {
     id: 'connection',
@@ -359,3 +354,62 @@ export function projectionValuesOf(ctx: Context, session: unknown): Record<strin
     return undefined
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * 6. 宿主契约变更实录（每轮升级后追加，只写"实测到了什么"）
+ * ------------------------------------------------------------------ */
+
+/**
+ * ## 0.2.0-rc.2 —— 两处真破坏（核对日期 2026-09-30）
+ *
+ * 从 0.1.5-rc.3 抬到 0.2.0-rc.2 后，**宿主侧 `tsc` 只有 4 个错误**，浏览器侧 0 个。
+ * 4 个错误归为两类，两类都不是「改一行签名」能解决的。
+ *
+ * ### ① `settings` 服务被重构成 `SettingsForms`
+ *
+ * | | 0.1.5-rc.3 | 0.2.0-rc.2 |
+ * | --- | --- | --- |
+ * | 形状 | `SettingsScope`：插件注册自己的命名空间 | `SettingsForms`：把 profile 配置投影成表单 |
+ * | API | `settings.register(ns, schema, { base })` | `configure` / `describe` / `update` / `replace` / `mutate` |
+ * | 插件自管偏好 | `scope.get` / `update` / `watch` | **没有对应物** |
+ *
+ * 编译期症状：
+ *   `Property 'register' does not exist on type 'SettingsForms'`
+ *   `Module '"@deepseek-ai/dsh-settings"' has no exported member 'SettingsScope'`
+ *
+ * **应对**：偏好改为自持久化（`src/preferences.ts` →
+ * `<DSH_HOME>/roundtable/preferences.json`），并同步从 `OPTIONAL_CAPABILITIES`、
+ * `CAPABILITY_SPECS`、`compatibility.json` 三处移除 `settings`。
+ *
+ * ⚠️ **不要再试图用 `ctx.inject(['settings'])` 注册命名空间** —— 那个能力在新模型
+ * 里不存在。插件现在的可配置面是它自己的 Cordis `Config`（Loader YAML 提供、宿主
+ * 自动生成配置页），而写 `Config` 会触发 entry 重载，不适合承载"改一个偏好"。
+ *
+ * ### ② `MessageSourceMap` 不再有 catch-all 的 `plugin` kind
+ *
+ * 基础表只剩 `user` / `model` / `tool` / `system-prompt`，其余由**生产者在自己
+ * 的模块里** `declare module '@deepseek-ai/dsh-llm'` 补上 —— 宿主内部插件
+ * （`tool-registry`、`ptc-mode`、`agent-message`、`subagent-settled` …）都是这么做的。
+ * 原文注释写得很直白：**"there is no shared catch-all `plugin` kind"**。
+ *
+ * 编译期症状：
+ *   `Type '"plugin"' is not assignable to type '"user" | "model" | "tool" | …'`
+ *
+ * **应对**：`src/members.ts` 自声明 `roundtable` kind（`{ kind: 'roundtable'; plugin: string }`），
+ * 而不是退化成匿名的 `user` —— 转录消费者需要把"插件注入的提示"与"用户说的话"分开。
+ *
+ * ### 保持不变的（本轮逐项复核确认）
+ *
+ * `inject` 的四个必需服务、`ctx.subagents` 的派发与 `interruptByParent`、
+ * `ctx.agents.get`、`subagent/end` 与 `agent/request-error` 事件、
+ * `webServer.register` 的形状、`connection.rpc.handle` 的两参签名与 disposer
+ * 返回值、`ctx.skills` / `ctx.userQuestions` / `sessionProjections.snapshot(session, keys)`、
+ * 以及全部浏览器侧槽位（`conversation.view` / `settings.section` /
+ * `tool.call.toolview`）—— 一律原样可用。
+ *
+ * ### 环境侧的老教训仍然有效
+ *
+ * 升级后**先跑 `node scripts/doctor.mjs`**：cordis 必须是同一物理副本，否则
+ * `declare module` 合并失效，会出现几十处「Context 上不存在某属性」的假故障，
+ * 看起来像 API 全崩。本轮 doctor 一次通过（混装 ✓ / cordis 同一性 ✓）。
+ */

@@ -22,11 +22,24 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 // Declaration merge only: makes ctx.llm visible for the model-list RPC.
 import type {} from '@deepseek-ai/dsh-llm'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { randomUUID } from 'node:crypto'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join } from 'node:path'
-import type { EdgeDirection, FeedbackEntry, RolePreset, RoleSquad, RoleSquadMember, UserAction } from './types.ts'
+import type { EdgeDirection, FeedbackEntry, UserAction } from './types.ts'
+// 偏好形状、净化规则与自持久化存储都住在 preferences.ts：宿主 0.2.0-rc.2 把
+// `settings` 服务重构成 `SettingsForms`（投影 profile 配置），插件不再能注册
+// 自己的命名空间，因此偏好改为落 DSH home 下的 JSON 文件。
+import {
+  ROLE_PRESET_MAX,
+  ROUNDTABLE_PANELS,
+  SQUAD_MAX,
+  SQUAD_MEMBER_MAX,
+  sanitizeHiddenPanels,
+  sanitizeRolePresets,
+  sanitizeSquads,
+  type PreferenceStore,
+  type RoundTablePreferences,
+} from './preferences.ts'
 import { interruptNodeByParent } from './members.ts'
 import {
   appendFeedback,
@@ -51,166 +64,28 @@ export type RpcResult<T> =
   | { ok: true; value: T; error?: never }
   | { ok: false; error: { code: string; message: string; details?: unknown }; value?: never }
 
-/** Wire shape of the runtime preferences. */
-export interface RoundTablePreferences {
-  readonly defaultMode: 'orchestrated' | 'egalitarian' | 'redteam'
-  readonly maxRounds: number
-  readonly maxTokens: number
-  /** 互通开关：true = 显示所有圆桌会议；false = 仅显示当前对话开启的会议。 */
-  readonly showAllMeetings: boolean
-  /** 专家每轮输出 token 上限（模型请求 max_tokens），0 = 不限制。 */
-  readonly expertMaxTokens: number
-  /** 专家每轮最多提几条意见，0 = 不限制。 */
-  readonly expertMaxOpinions: number
-  /** E1/E4 反馈：会议结束后是否询问轻量反馈；false = 永久关闭（设置页可改）。 */
-  readonly feedbackEnabled: boolean
-  /** R2.2/D5：skill 传递方式（relay=主持人中转；direct=专家自行调用）。 */
-  readonly skillDelivery: 'relay' | 'direct'
-  /** 右栏面板可见性（R3）：被列出的面板在拓扑页隐藏；空 = 全部显示。 */
-  readonly hiddenPanels: string[]
-  /** A1：画布图例是否已被用户关闭（默认 false = 显示）。 */
-  readonly legendHidden: boolean
-  /** B3：用户自建角色预设（全局偏好；不预置任何内置角色）。 */
-  readonly rolePresets: RolePreset[]
-  /** B3+：用户自建阵容预设（一次套用多位专家；同样不预置）。 */
-  readonly squads: RoleSquad[]
-}
-
-/** 右栏可隐藏的面板 id（客户端与服务端共用的稳定标识）。 */
-export const ROUNDTABLE_PANELS: readonly string[] = [
-  'agents',
-  'tasks',
-  'kb',
-  'skills',
-  'activity',
-  'review',
-  'files',
-]
-
-/** 把任意输入收敛成合法的隐藏面板清单（未知 id 丢弃，去重）。 */
-export function sanitizeHiddenPanels(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const out: string[] = []
-  for (const item of value) {
-    const id = typeof item === 'string' ? item.trim() : ''
-    if (id === '' || !ROUNDTABLE_PANELS.includes(id) || out.includes(id)) continue
-    out.push(id)
-  }
-  return out
-}
-
-/** 预设条目的硬上限（客户端与服务端共用；服务端截断，客户端提前拦截）。 */
-export const ROLE_PRESET_MAX = 50
-const ROLE_PRESET_ID_MAX = 64
-const ROLE_PRESET_NAME_MAX = 40
-const ROLE_PRESET_ROLE_MAX = 400
-
 /**
- * 把任意输入收敛成合法的角色预设清单（B3）。
- *
- * schemastery 的 `z.object` 在 resolve 阶段**不校验缺失的 required 字段**
- * （`s({ rolePresets: [{ id: 'a' }] })` 直接通过），所以条目级校验不能依赖
- * schema，必须在这里手写 —— 与 {@link sanitizeHiddenPanels} 同一套路：
- *   - `name` 与 `role` 非空是硬要求，二者缺一即丢弃该条；
- *   - `id` 为空或与前面的条目重复时**重新分配**（保数据，不静默丢条目）；
- *   - `provider`/`model` 必须成对出现，否则整体视为"继承主持人"；
- *   - 单字段超长截断，总条数超 {@link ROLE_PRESET_MAX} 截断。
+ * 偏好形状与净化规则住在 `preferences.ts`（那里的模块注释说明了原因：宿主
+ * 0.2.0-rc.2 把 `settings` 服务重构成 `SettingsForms`，插件不再能注册自己的
+ * 命名空间）。这里 re-export 只为不打断既有引用路径。
  */
-export function sanitizeRolePresets(value: unknown): RolePreset[] {
-  if (!Array.isArray(value)) return []
-  const out: RolePreset[] = []
-  const seen = new Set<string>()
-  for (const item of value) {
-    if (out.length >= ROLE_PRESET_MAX) break
-    if (item === null || typeof item !== 'object') continue
-    const raw = item as { id?: unknown; name?: unknown; role?: unknown; provider?: unknown; model?: unknown }
-    const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, ROLE_PRESET_NAME_MAX) : ''
-    const role = typeof raw.role === 'string' ? raw.role.trim().slice(0, ROLE_PRESET_ROLE_MAX) : ''
-    if (name === '' || role === '') continue
-    const candidate = typeof raw.id === 'string' ? raw.id.trim().slice(0, ROLE_PRESET_ID_MAX) : ''
-    const id = candidate === '' || seen.has(candidate) ? randomUUID() : candidate
-    seen.add(id)
-    const provider = typeof raw.provider === 'string' ? raw.provider.trim() : ''
-    const model = typeof raw.model === 'string' ? raw.model.trim() : ''
-    const routed = provider !== '' && model !== ''
-    out.push({
-      id,
-      name,
-      role,
-      ...(routed ? { provider, model } : {}),
-    })
-  }
-  return out
+export type { RoundTablePreferences }
+// 与旧版一致：净化函数与上限常量仍从 rpc.ts 可取（测试与工具都按这个路径导入）。
+export {
+  ROLE_PRESET_MAX,
+  ROUNDTABLE_PANELS,
+  SQUAD_MAX,
+  SQUAD_MEMBER_MAX,
+  sanitizeHiddenPanels,
+  sanitizeRolePresets,
+  sanitizeSquads,
 }
 
-/** 阵容预设的硬上限（客户端与服务端共用；服务端截断，客户端提前拦截）。 */
-export const SQUAD_MAX = 20
-export const SQUAD_MEMBER_MAX = 8
-const SQUAD_ID_MAX = 64
-const SQUAD_NAME_MAX = 40
-const SQUAD_MEMBER_ROLE_MAX = 400
-
-/** 阵容成员 key 的净化规则：与客户端 `sanitizeKey` 同源
- *  （小写、保留中日韩、非法字符折成 '-'、去首尾）。 */
-function sanitizeSquadKey(value: unknown): string {
-  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  return raw.replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '')
-}
-
-/**
- * 把任意输入收敛成合法的阵容预设清单（B3+）。
- *
- * 与 {@link sanitizeRolePresets} 同一套路（schemastery 不校验 required，
- * 条目级校验只能手写），差别只有两条：
- *   - 成员的**去重键是 key**（同一阵容里不能有两位同名专家）；
- *   - **没有任何成员的阵容被丢弃** —— 否则设置页会出现一条点了没反应的条目。
- *
- * 兼容性（这一条就是"结构变更必须自带迁移"的落地方式）：`squads` 是
- * **可选新增字段**，旧偏好对象里没有它时读到的是 `[]`，读侧归一化、
- * 只有用户真的保存时才写回，因此不需要版本号迁移，也不可能损坏已有数据。
- */
-export function sanitizeSquads(value: unknown): RoleSquad[] {
-  if (!Array.isArray(value)) return []
-  const out: RoleSquad[] = []
-  const seenIds = new Set<string>()
-  for (const item of value) {
-    if (out.length >= SQUAD_MAX) break
-    if (item === null || typeof item !== 'object') continue
-    const raw = item as { id?: unknown; name?: unknown; members?: unknown }
-    const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, SQUAD_NAME_MAX) : ''
-    if (name === '') continue
-    const members: RoleSquadMember[] = []
-    const seenKeys = new Set<string>()
-    if (Array.isArray(raw.members)) {
-      for (const entry of raw.members) {
-        if (members.length >= SQUAD_MEMBER_MAX) break
-        if (entry === null || typeof entry !== 'object') continue
-        const member = entry as { key?: unknown; role?: unknown; provider?: unknown; model?: unknown }
-        const key = sanitizeSquadKey(member.key)
-        if (key === '' || seenKeys.has(key)) continue
-        seenKeys.add(key)
-        const role = typeof member.role === 'string' ? member.role.trim().slice(0, SQUAD_MEMBER_ROLE_MAX) : ''
-        const provider = typeof member.provider === 'string' ? member.provider.trim() : ''
-        const model = typeof member.model === 'string' ? member.model.trim() : ''
-        const routed = provider !== '' && model !== ''
-        members.push({ key, role, ...(routed ? { provider, model } : {}) })
-      }
-    }
-    if (members.length === 0) continue
-    const candidate = typeof raw.id === 'string' ? raw.id.trim().slice(0, SQUAD_ID_MAX) : ''
-    const id = candidate === '' || seenIds.has(candidate) ? randomUUID() : candidate
-    seenIds.add(id)
-    out.push({ id, name, members })
-  }
-  return out
-}
-
-/** Holder shared between the settings fiber and the RPC fiber. */
+/** 自持久化偏好存储 + 会议 state 根，共享给工具与 RPC 两条执行路径。 */
 export interface RoundTableRuntime {
-  scope: SettingsScope<RoundTablePreferences> | undefined
+  /** 偏好读写（见 preferences.ts：宿主 settings 服务在 0.2.0-rc.2 已重构）。 */
+  prefs: PreferenceStore
   stateDir: string
-  /** In-memory preferences used when the settings scope is not mounted. */
-  fallbackPrefs: RoundTablePreferences
 }
 
 /**
@@ -337,7 +212,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
     try {
       switch (endpoint) {
           case 'roundtable/prefs.get': {
-            const prefs = runtime.scope?.get() ?? runtime.fallbackPrefs
+            const prefs = runtime.prefs.get()
             return ok<RoundTablePreferences>({
               defaultMode: prefs.defaultMode,
               maxRounds: prefs.maxRounds,
@@ -358,51 +233,15 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
             if (patch === undefined || typeof patch !== 'object' || patch === null) {
               return fail('payload must be a preferences patch object')
             }
-            // 0 = 不限制；任何有限非负整数都接受。
-            const clampLimit = (value: unknown, fallback: number): number =>
-              typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback
-            if (runtime.scope === undefined) {
-              // Settings not mounted: keep an in-memory fallback so the settings
-              // page stays usable; persistence resumes on the next clean start.
-              const base = runtime.fallbackPrefs
-              const next: RoundTablePreferences = {
-                defaultMode: patch.defaultMode === 'orchestrated' || patch.defaultMode === 'egalitarian' || patch.defaultMode === 'redteam' ? patch.defaultMode : base.defaultMode,
-                maxRounds: typeof patch.maxRounds === 'number' && Number.isFinite(patch.maxRounds) && patch.maxRounds >= 1 ? Math.floor(patch.maxRounds) : base.maxRounds,
-                maxTokens: typeof patch.maxTokens === 'number' && Number.isFinite(patch.maxTokens) && patch.maxTokens >= 1000 ? Math.floor(patch.maxTokens) : base.maxTokens,
-                showAllMeetings: typeof patch.showAllMeetings === 'boolean' ? patch.showAllMeetings : base.showAllMeetings,
-                expertMaxTokens: clampLimit(patch.expertMaxTokens, base.expertMaxTokens ?? 0),
-                expertMaxOpinions: clampLimit(patch.expertMaxOpinions, base.expertMaxOpinions ?? 0),
-                feedbackEnabled: typeof patch.feedbackEnabled === 'boolean' ? patch.feedbackEnabled : (base.feedbackEnabled ?? true),
-                skillDelivery: patch.skillDelivery === 'direct' || patch.skillDelivery === 'relay' ? patch.skillDelivery : base.skillDelivery,
-                hiddenPanels: patch.hiddenPanels === undefined ? base.hiddenPanels : sanitizeHiddenPanels(patch.hiddenPanels),
-                legendHidden: typeof patch.legendHidden === 'boolean' ? patch.legendHidden : (base.legendHidden ?? false),
-                rolePresets: patch.rolePresets === undefined ? (base.rolePresets ?? []) : sanitizeRolePresets(patch.rolePresets),
-                squads: patch.squads === undefined ? (base.squads ?? []) : sanitizeSquads(patch.squads),
-              }
-              runtime.fallbackPrefs = next
-              return ok<RoundTablePreferences>({
-                defaultMode: next.defaultMode,
-                maxRounds: next.maxRounds,
-                maxTokens: next.maxTokens,
-                showAllMeetings: next.showAllMeetings,
-                expertMaxTokens: next.expertMaxTokens,
-                expertMaxOpinions: next.expertMaxOpinions,
-                feedbackEnabled: next.feedbackEnabled,
-                skillDelivery: next.skillDelivery,
-                hiddenPanels: next.hiddenPanels,
-                legendHidden: next.legendHidden ?? false,
-                rolePresets: next.rolePresets ?? [],
-                squads: next.squads ?? [],
-              })
-            }
             // 写入前先净化：坏数据不落库（schemastery 不会替我们拦）。
+            // preferences.ts 的 normalizePreferences 同时承担"只覆盖出现过的字段"
+            // 这层语义 —— 与旧宿主 `SettingsScope.update(patch)` 的行为一致。
             const sanitized: Record<string, unknown> = { ...patch }
             if (patch.hiddenPanels !== undefined) sanitized.hiddenPanels = sanitizeHiddenPanels(patch.hiddenPanels)
             if (patch.legendHidden !== undefined) sanitized.legendHidden = patch.legendHidden === true
             if (patch.rolePresets !== undefined) sanitized.rolePresets = sanitizeRolePresets(patch.rolePresets)
             if (patch.squads !== undefined) sanitized.squads = sanitizeSquads(patch.squads)
-            await runtime.scope.update(sanitized)
-            const next = runtime.scope.get()
+            const next = await runtime.prefs.update(sanitized)
             return ok<RoundTablePreferences>({
               defaultMode: next.defaultMode,
               maxRounds: next.maxRounds,

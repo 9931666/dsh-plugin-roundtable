@@ -20,6 +20,32 @@ import { ACTIVE_NODE_STATUSES, CAPTAIN_KEY } from './types.ts'
 import { nodePersona, nodeWelcome } from './prompt.ts'
 import type { ExpertLimits, NodeSkillContext } from './prompt.ts'
 
+/**
+ * 本插件自己声明的 `MessageSourceMap` 条目。
+ *
+ * 0.1.5-rc.3 的宿主有一个 catch-all 的 `plugin` kind
+ * （`{ kind: 'plugin', plugin: string }`），本插件曾用它标注注入给主持人的
+ * steering 内容。**0.2.0-rc.2 移除了它**：`@deepseek-ai/dsh-llm` 的
+ * `MessageSourceMap` 只保留 `user` / `model` / `tool` / `system-prompt`，
+ * 其余一律由**生产者在自己的模块里声明**——宿主的 `tool-registry`、
+ * `ptc-mode`、`agent-message`、`subagent-settled` 都是这么做的。原文注释写得很
+ * 直白："there is no shared catch-all `plugin` kind"。
+ *
+ * 所以这里按同一模式补上本插件的 kind，而不是退化成匿名的 `user` 消息：
+ * 转录消费者据此把"插件注入的提示"与"用户自己说的话"分开显示。
+ * 运行时无影响——`kind` 是归属标签，未知值一律 fall through。
+ */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** 圆桌会议插件注入的 steering / 系统侧提示。 */
+    roundtable: {
+      kind: 'roundtable'
+      /** 生产者标识，便于在转录里追溯来源。 */
+      plugin: string
+    }
+  }
+}
+
 /** Runtime knobs for node spawning, resolved from plugin config. */
 export interface MemberRuntimeConfig {
   /** Registered `ctx.subagents` provider name (must support continuable + persona). */
@@ -248,7 +274,7 @@ export function steerCaptain(captain: Agent, text: string): boolean {
   try {
     captain.steer(createUserMessage({
       content: [{ type: 'text', text }],
-      source: { kind: 'plugin', plugin: 'dsh-plugin-roundtable' },
+      source: { kind: 'roundtable', plugin: 'dsh-plugin-roundtable' },
     }))
     return true
   } catch {

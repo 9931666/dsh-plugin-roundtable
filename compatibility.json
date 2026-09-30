@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "recommendedHost": "0.1.5-rc.3",
+  "recommendedHost": "0.2.0-rc.2",
   "previewTag": "next",
   "supportedHosts": [
     {
-      "version": "0.1.5-rc.3",
+      "version": "0.2.0-rc.2",
       "track": "recommended"
     }
   ],
@@ -19,7 +19,6 @@
       "connection",
       "llm",
       "skills",
-      "settings",
       "userQuestions",
       "sessionProjections",
       "webServer",
@@ -27,7 +26,7 @@
     ]
   },
   "baseline": {
-    "note": "开发/类型基线必须与 recommendedHost 精确一致：插件发布后，消费者任何机器上 npm install 拿到的类型就是这里声明的版本。三者（本文件、package.json 的 devDependencies、src/index.ts 的 inject）由 scripts/compatibility.mjs 强制一致。",
+    "note": "开发/类型基线必须与 recommendedHost 精确一致：插件发布后，消费者任何机器上 npm install 拿到的类型就是这里声明的版本。四处（本文件、package.json 的 devDependencies 与 peerDependencies、src/harness-compat.ts 的能力清单、src/index.ts 的 inject）由 scripts/compatibility.mjs 强制一致。0.1.5-rc.3 曾受支持：peer 区间只能有一条，而类型基线也只有一个版本，所以本次整条切到 0.2 线；源码里的可选能力探测仍保留对旧形状的降级，但不再对外承诺。",
     "packages": [
       "@deepseek-ai/dsh-agent",
       "@deepseek-ai/dsh-atomic-write",
@@ -40,7 +39,6 @@
       "@deepseek-ai/dsh-host-webserver",
       "@deepseek-ai/dsh-llm",
       "@deepseek-ai/dsh-session",
-      "@deepseek-ai/dsh-settings",
       "@deepseek-ai/dsh-skill",
       "@deepseek-ai/dsh-subagent",
       "@deepseek-ai/dsh-system-prompt",

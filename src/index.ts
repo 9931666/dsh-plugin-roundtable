@@ -35,6 +35,11 @@ import {
   webRouteHostOf,
   workspaceRegistryOf,
 } from './harness-compat.ts'
+import {
+  createPreferenceStore,
+  defaultPreferences,
+  type RoundTablePreferences,
+} from './preferences.ts'
 import { setWorkspaceCandidates, workspaceCandidates } from './workspace-candidates.ts'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -86,53 +91,10 @@ export const Config: z<Config> = z.object({
   promptSectionOrder: z.natural().default(116),
 })
 
-/** Settings namespace for the runtime-tunable preferences (mode default, budget defaults). */
-export const SETTINGS_NAMESPACE = 'roundtable' as const
-
-/** User-tunable preference schema persisted under the `roundtable` namespace. */
-const PreferenceSchema = z.object({
-  defaultMode: z.union(['orchestrated', 'egalitarian', 'redteam']).default('orchestrated'),
-  maxRounds: z.natural().default(10),
-  maxTokens: z.natural().default(200_000),
-  showAllMeetings: z.boolean().default(true),
-  /** 专家每轮输出 token 上限（模型请求 max_tokens），0 = 不限制。 */
-  expertMaxTokens: z.natural().default(0),
-  /** 专家每轮最多提几条意见，0 = 不限制。 */
-  expertMaxOpinions: z.natural().default(0),
-  /** E1/E4 反馈：会议结束后是否询问轻量反馈（默认开，可在设置页关闭）。 */
-  feedbackEnabled: z.boolean().default(true),
-  /** R2.2/D5 skill 传递方式：relay=主持人中转（省 token、可预测）；direct=专家自行调用 `skill` 工具。 */
-  skillDelivery: z.union(['relay', 'direct']).default('relay'),
-  /** R3 右栏面板可见性：被列出的面板在拓扑页隐藏（空 = 全部显示）。 */
-  hiddenPanels: z.array(z.string()).default([]),
-  /** A1：画布图例是否已被用户关闭（默认 false = 显示）。
-   *  与 hiddenPanels 同样带默认值的可选新增字段 —— 旧偏好对象不需迁移。 */
-  legendHidden: z.boolean().default(false),
-  /** B3 用户自建角色预设：设置页维护，专家管理面板一键填充。
-   *  刻意**不预置任何内置角色** —— 列表空着，等用户自己建。
-   *  注意 schemastery 不强制 required，字段级校验在 rpc.ts 手写。 */
-  rolePresets: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    role: z.string(),
-    provider: z.string(),
-    model: z.string(),
-  })).default([]),
-  /** B3+ 用户自建阵容预设：一次把多位专家排进待加入队列。
-   *  与角色预设同样**不预置内置阵容**；条目级校验在 rpc.ts 手写
-   *  （schemastery 不强制 required）。新增字段是可选且带默认值，
-   *  因此旧偏好对象无需版本迁移即可读。 */
-  squads: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    members: z.array(z.object({
-      key: z.string(),
-      role: z.string(),
-      provider: z.string(),
-      model: z.string(),
-    })),
-  })).default([]),
-})
+// 偏好默认值与净化规则已迁往 `preferences.ts`（`defaultPreferences()` /
+// `normalizePreferences()`）。宿主 0.2.0-rc.2 的 `SettingsForms` 只投影 profile
+// 配置，不再接受插件注册自己的命名空间，`PreferenceSchema` 因此失去宿主侧
+// 落点；默认值也随之从"schemastery 默认 + 手写兜底"两处收敛为一处，不会再漂移。
 
 // 主持人 usage 段已迁往 prompt.ts（纯文本模块，体积可被测试断言）。
 
@@ -154,29 +116,43 @@ export function apply(ctx: Context, config: Config): void {
     text: usageSectionText(),
   })
 
-  // Settings-backed runtime preferences (mode default, budget defaults, expert
-  // answer limits). The cordis.yml config is the composition base; the user
-  // layer wins. Settings are consumed by the client settings page (via RPC)
-  // and by the tools' defaults. Declared before the tools so their lazy
-  // getExpertLimits closure can read the live scope.
+  // 偏好存储（模式默认值、预算默认值、专家回答上限）。插件 Config 是组合基准，
+  // 用户偏好赢。偏好由客户端设置页经 RPC 读写，也被各工具的默认值消费；在工具
+  // 注册之前创建，这样它们的惰性闭包能读到实时值。
+  //
+  // 0.2.0-rc.2 起偏好不再寄存在宿主的 settings 命名空间：该服务被重构成
+  // `SettingsForms`（只把 profile 配置投影成表单），插件没有"注册自己的命名
+  // 空间"这个动作了。改为 preferences.ts 的自持久化 JSON —— 顺带的好处是这条
+  // 路径没有任何可选能力可缺，设置页不会再因宿主服务缺席而退化。
   const runtime: RoundTableRuntime = {
-    scope: undefined,
+    prefs: createPreferenceStore({
+      base: defaultPreferences(resolved.defaultMode),
+      log: (message, error) => {
+        if (error === undefined) ctx.logger.warn(message)
+        else ctx.logger.warn(message, error)
+      },
+    }),
     stateDir: resolved.stateDir,
-    fallbackPrefs: {
-      defaultMode: resolved.defaultMode,
-      maxRounds: 10,
-      maxTokens: 200_000,
-      showAllMeetings: true,
-      expertMaxTokens: 0,
-      expertMaxOpinions: 0,
-      feedbackEnabled: true,
-      skillDelivery: 'relay',
-      hiddenPanels: [],
-      legendHidden: false,
-      rolePresets: [],
-      squads: [],
-    },
   }
+
+  // 偏好里的 defaultMode 就是"设置页那一层"：用户一改，后续新建会议立即采用。
+  const applyDefaultMode = (preference: RoundTablePreferences): void => {
+    if (
+      preference.defaultMode === 'orchestrated'
+      || preference.defaultMode === 'egalitarian'
+      || preference.defaultMode === 'redteam'
+    ) {
+      resolved.defaultMode = preference.defaultMode
+    }
+  }
+  runtime.prefs.watch(applyDefaultMode)
+  // 读盘是异步的：首次加载完成后补同步一次 —— 用户上次选定的模式不该等到他
+  // 再动一次设置才生效。
+  void runtime.prefs.ready().then(() => {
+    applyDefaultMode(runtime.prefs.get())
+  }).catch(() => {
+    // ready() 内部已把读失败降级为默认值，这里无事可做。
+  })
 
   registerRoundTableTools(ctx, {
     stateDir: resolved.stateDir,
@@ -194,17 +170,17 @@ export function apply(ctx: Context, config: Config): void {
     // Read live every spawn so a settings change applies to newly added
     // experts without a restart.
     getExpertLimits: () => {
-      const prefs = runtime.scope?.get() ?? runtime.fallbackPrefs
+      const prefs = runtime.prefs.get()
       return {
         maxTokens: prefs.expertMaxTokens ?? 0,
         maxOpinions: prefs.expertMaxOpinions ?? 0,
       }
     },
     // R2.2/D5：skill 传递方式的默认值，读设置页（实时）。
-    getSkillDelivery: () => (runtime.scope?.get() ?? runtime.fallbackPrefs).skillDelivery ?? 'relay',
+    getSkillDelivery: () => (runtime.prefs.get()).skillDelivery ?? 'relay',
     // R1 第 3 条：卡片默认值的设置页那一层。
     getPlannedDefaults: () => {
-      const prefs = runtime.scope?.get() ?? runtime.fallbackPrefs
+      const prefs = runtime.prefs.get()
       return {
         mode: prefs.defaultMode,
         maxRounds: prefs.maxRounds,
@@ -216,22 +192,9 @@ export function apply(ctx: Context, config: Config): void {
   // 第 1 批：接入宿主子代理生命周期 —— 专家产出自动落盘（即使它没调
   // roundtable_speak 或中途中断），失败原因写进 node.lastError。
   attachNodeEvents(ctx)
-  ctx.inject(['settings'], (settingsCtx) => {
-    try {
-      const scope = settingsCtx.settings.register(SETTINGS_NAMESPACE, PreferenceSchema, {
-        base: { defaultMode: resolved.defaultMode },
-      }) as unknown as RoundTableRuntime['scope']
-      runtime.scope = scope
-      scope?.watch((value) => {
-        const preference = value as { defaultMode?: 'orchestrated' | 'egalitarian' } | undefined
-        if (preference?.defaultMode === 'orchestrated' || preference?.defaultMode === 'egalitarian') {
-          resolved.defaultMode = preference.defaultMode
-        }
-      })
-    } catch (error) {
-      settingsCtx.logger.warn('roundtable: settings namespace registration failed; preferences fall back to config defaults', error)
-    }
-  })
+  // 偏好的注册点已随宿主 settings 服务重构而移除：0.2.0-rc.2 的
+  // `SettingsForms` 只投影 profile 配置，插件不再能注册自己的命名空间。
+  // 偏好的创建与订阅见上方 runtime 构造处（preferences.ts 自持久化）。
 
   // Browser RPC (preferences, edge edits, KB path, review 表态 …). The same
   // dispatch body is mounted on the plugin's own web route below.
