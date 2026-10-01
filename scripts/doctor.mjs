@@ -167,7 +167,7 @@ if (hostRoot !== undefined) {
 // ---------------------------------------------- 已安装插件版本
 
 if (report.profileRoot !== undefined) {
-  const installed = join(resolve(report.profileRoot), 'node_modules', '@huanlin', 'dsh-plugin-roundtable', 'package.json')
+  const installed = join(resolve(report.profileRoot), 'node_modules', '@y9931666', 'dsh-plugin-roundtable', 'package.json')
   try {
     report.installedPluginVersion = (await load(installed)).version
   } catch {

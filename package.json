@@ -1,5 +1,5 @@
 {
-  "name": "@huanlin/dsh-plugin-roundtable",
+  "name": "@y9931666/dsh-plugin-roundtable",
   "version": "1.0.0-rc.2",
   "publishConfig": {
     "access": "public",
@@ -7,7 +7,7 @@
   },
   "description": "RoundTable for DeepSeek Harness: turn one session into a visualized round-table meeting — expert nodes on a ring, directed edges, an aggregation gateway, proxy thinking for black-box worker models, and a live topology tab in the web GUI. Includes 针锋相对 (adversarial review): red-team experts attack a settled plan and you endorse real flaws.",
   "author": {
-    "name": "huanlin",
+    "name": "y9931666",
     "url": "https://github.com/9931666"
   },
   "homepage": "https://github.com/9931666/dsh-plugin-roundtable#readme",

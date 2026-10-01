@@ -25,7 +25,7 @@ test('src/version.ts 的 PLUGIN_VERSION 必须与 package.json 的 version 逐�
 })
 
 test('PLUGIN_ID 由当前版本号拼装（不再出现硬编码旧版本）', () => {
-  assert.equal(PLUGIN_ID, `@huanlin/dsh-plugin-roundtable v${PLUGIN_VERSION}`)
+  assert.equal(PLUGIN_ID, `@y9931666/dsh-plugin-roundtable v${PLUGIN_VERSION}`)
 })
 
 test('版本号是合法的语义化版本（允许带预发布后缀）', () => {

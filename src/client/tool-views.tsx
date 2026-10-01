@@ -11,7 +11,7 @@
  * 只有 `argsRaw`。解析失败**一律回退为纯文本**——绝不显示空白卡片，那会比通用
  * tool 行更糟。纯逻辑在 tool-views-model.ts（JSX 无法被零依赖测试直接加载）。
  *
- * @module @huanlin/dsh-plugin-roundtable/client/tool-views
+ * @module @y9931666/dsh-plugin-roundtable/client/tool-views
  */
 
 import type { CSSProperties } from 'react'

@@ -2,12 +2,11 @@
 /**
  * 发布护栏（发布语义门禁）。
  *
- * ⚠️ **现状（2026-09-24）：本插件不发布到 npm。**
- *    作者因**个人原因无法注册 npm 账户**（`@huanlin` scope 拿不到），registry 上不存在
- *    这个包，`npm publish` 必然 403。发行渠道改为 **GitHub**（`git tag` → Release）。
- *    脚本因此只保留**产物指纹与版本一致性**这一半职责：registry 查询、渠道判定、
- *    scope 提醒等 npm 语义项仍然照跑（它们正好解释了"为什么发不出去"），但
- *    `--publish` 分支已停用。详见 `HANDOVER.md` §5.2。
+ * **现状：本插件发布到 npm**（`@y9931666/dsh-plugin-roundtable`）+ GitHub Release。
+ *    （2026-09-24 曾因拿不到 `@huanlin` scope 而停发 npm；作者后来注册了账户
+ *    `y9931666`，包名改用该 scope，npm 渠道恢复。详见 `HANDOVER.md` §5.2。）
+ *    脚本负责**产物指纹与版本一致性**：registry 查询、渠道判定、scope 提醒、
+ *    SHA-256 快照。它**永远不替你 publish** —— `npm publish` 由人显式执行。
  *
  * **发布是单向操作**：`npm publish` 之后版本永久存在，只能 `npm deprecate`，
  * 装过的人不会自动回退。所以"发之前该确认什么"必须由脚本回答，而不是靠记性。
@@ -30,7 +29,7 @@
  *
  * 用法：
  *   node scripts/release.mjs                # 只做检查与指纹（默认，安全）
- *   node scripts/release.mjs --publish      # 已停用：本插件不发 npm（见上方现状说明）
+ *   node scripts/release.mjs --publish      # 只打印该执行的 npm publish 命令，不代发
  *   node scripts/release.mjs --json
  */
 import { createHash } from 'node:crypto'
@@ -332,15 +331,14 @@ if (fatalFailures.length > 0) {
 }
 
 if (doPublish) {
-  // npm 路线已作废（作者个人原因无法注册 npm 账户，见 HANDOVER §5.2）：
-  // registry 上不存在这个包，继续 publish 只会拿到 403。这里直接拒绝，
-  // 而不是"跑一遍再失败"—— 发布是单向操作，不该留一个会误伤的分支。
-  process.stdout.write('\n--publish 已停用：本插件不发布到 npm，发行渠道是 GitHub。\n')
+  // 刻意不代发：发布是单向操作（见文件头），脚本只把该敲的命令摆出来。
+  process.stdout.write('\n检查全绿。请自行执行发布（脚本不代发）：\n')
+  process.stdout.write(`  npm publish --access public${tag === 'latest' ? '' : ` --tag ${tag}`}\n`)
   process.stdout.write(`  git tag v${version} && git push origin v${version}\n`)
-  process.exit(1)
+  process.exit(0)
 }
 
 process.stdout.write('\n检查全绿：这是一份可发布快照（产物 SHA-256 已记录）。\n')
-process.stdout.write('发行渠道是 GitHub，不是 npm：\n')
+process.stdout.write('发行渠道：npm 首发，GitHub Release 同 tag 留档。发布前请确认已构建（lib/ 不进 git）：\n')
 process.stdout.write(`  git tag v${version} && git push origin v${version}\n`)
-process.stdout.write('（本脚本不调用 npm，也不会替你发布；CI 只据此创建 GitHub Release。）\n')
+process.stdout.write('（本脚本不调用 npm，也不会替你发布；CI 由 tag 触发 npm publish 与 GitHub Release。）\n')

@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, dirname, resolve as resolvePath } from 'node:path'
 
-const ID = '@huanlin/dsh-plugin-roundtable'
+const ID = '@y9931666/dsh-plugin-roundtable'
 
 /** DSH platform modules that stay external in the browser bundle. */
 const CLIENT_EXTERNALS = [

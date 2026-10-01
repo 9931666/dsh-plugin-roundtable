@@ -7,7 +7,7 @@
 # Install: `dsh plugin --profile <name> add <this package>`.
 - insert:
     - id: roundtable
-      name: '@huanlin/dsh-plugin-roundtable'
+      name: '@y9931666/dsh-plugin-roundtable'
       config:
         # Meeting state lives under `<session workspace>/.roundtable/<meetingId>/`
         stateDir: .roundtable

@@ -8,7 +8,7 @@
  *   2. `settings.section` slot, id `roundtable` — the preference page
  *      (default collaboration mode + budget defaults).
  *
- * @module @huanlin/dsh-plugin-roundtable/client
+ * @module @y9931666/dsh-plugin-roundtable/client
  */
 
 import type { Context } from '@deepseek-ai/cordis'

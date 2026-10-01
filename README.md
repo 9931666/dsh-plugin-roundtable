@@ -112,12 +112,22 @@
 > 自声明 `roundtable` kind。**0.1.5-rc.3 及更早的宿主不再受支持**（peer 区间与
 > 类型基线各只能有一个版本）。详见 [`release-notes/v1.0.0-rc.2.md`](release-notes/v1.0.0-rc.2.md)。
 
-> [!IMPORTANT]
-> **本插件不发布到 npm。** 作者因**个人原因无法注册 npm 账户**（拿不到 `@huanlin` scope），
-> registry 上并不存在这个包，`dsh plugin add <包名>` 这条路走不通。
-> **从源码安装是唯一方式**（见下）。`package.json` 里的 `name` / `publishConfig` 只是仓库内的元数据。
+```sh
+dsh plugin --profile web add @y9931666/dsh-plugin-roundtable@next
+```
 
-**从源码构建**（修改源码后重新 `pnpm build`，本地安装继续链接当前目录）：
+装完**重启 DSH**（关窗口 → 重新启动）→ 刷新 Web UI → 设置 → 圆桌会议能读出默认值即可。
+
+> [!IMPORTANT]
+> **包名是 `@y9931666/...`，不是历史文档里的 `@huanlin/...`。** 作者手上的 npm 账户是
+> `y9931666`，而 `@huanlin` 这个 scope 属于**另一个用户**（他也在发 DSH 插件）。
+> 历史 release-notes 里 `@huanlin/dsh-plugin-roundtable` 的安装命令一律不可用。
+>
+> **这一版是预发布（`1.0.0-rc.2`），所以装的时候要带 `@next`。** npm 对带预发布后缀的
+> 版本不会更新 `latest` 标签，`dsh plugin add @y9931666/dsh-plugin-roundtable` 会报找不到
+> `latest`；`@next` 就是本插件预发布版的固定入口。稳定版发布后才可以省掉 `@next`。
+
+**从源码构建**（要改源码时用；本地安装链接当前目录）：
 
 ```sh
 git clone https://github.com/9931666/dsh-plugin-roundtable
@@ -291,20 +301,23 @@ pnpm publish:guard   # 上面三项串起来跑一遍，全绿才算可发（渠
 > 表现为编译期大片 `Property 'subagents' does not exist on type 'Context'`。
 > 这**不是** API 破坏——`pnpm doctor` 会直接告诉你是不是混装。
 
-### 发布（只发 GitHub，不发 npm）
+### 发布（npm + GitHub Release）
 
-> **本插件的发行渠道是 GitHub，不是 npm。** 作者个人原因无法注册 npm 账户，
-> 没有 registry 可发；下面的工程门禁依然全部有效，只是最后一步换成打 tag。
+> **本插件的发行渠道是 npm**，包名 `@y9931666/dsh-plugin-roundtable`；GitHub Release
+> 同时打，用来留档与通知。
 
 ```sh
 pnpm build && pnpm publish:guard                     # 全绿才算可发
+npm publish                                          # 预发布自动进 next，稳定版进 latest
 git tag v<version> && git push origin v<version>     # GitHub Release 的触发点
 ```
 
 - `scripts/release.mjs` 只做**产物快照**：渠道判定、防 latest 倒退、产物 SHA-256
-  与候选 `.tgz`（写到 `.git/pack-preview/`）。它**不调用 npm，也不会替你发布**。
-- 用户端安装方式恒为**源码 / GitHub**（见上文「安装」）——
-  registry 上不存在 `@huanlin/dsh-plugin-roundtable`，历史文档里出现的该命令一律不可用。
+  与候选 `.tgz`（写到 `.git/pack-preview/`）。它**不调用 npm，也不会替你发布**
+  —— `npm publish` 那一步永远由人显式执行。
+- **先构建再发布**：`lib/` 不进 git（`.gitignore` 排除了它），`npm publish` 打的是
+  你本地磁盘上的 `lib/`。忘了 `pnpm build` 就会把上一次的旧产物发出去。
+- 用户端装预发布版要带 `@next`：`dsh plugin --profile web add @y9931666/dsh-plugin-roundtable@next`。
 - 本机若 `pnpm install` 报 `ERR_SQLITE_ERROR / unable to open database file`，
   那是 pnpm store 数据库不可用（不是依赖问题）：换一个可写的 store 路径，
   或在能跑 pnpm 的机器上重装后同步 `node_modules`。此状态下也可以直接运行

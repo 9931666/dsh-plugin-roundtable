@@ -106,7 +106,7 @@ function hostShapedCtx() {
 
 test('浏览器产物 inject 不含可选传输 connection，且必须注册两个界面入口', () => {
   const { id, exports } = loadClientBundle()
-  assert.equal(id, '@huanlin/dsh-plugin-roundtable', 'bundle 注册的 id 必须与包名一致')
+  assert.equal(id, '@y9931666/dsh-plugin-roundtable', 'bundle 注册的 id 必须与包名一致')
   assert.ok(!exports.inject.includes('connection'),
     'inject 里出现了 "connection"：它只是 RPC 兜底传输，缺失时会让页签与设置页整体不注册')
 

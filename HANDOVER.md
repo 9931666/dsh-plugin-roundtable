@@ -207,28 +207,37 @@ git push origin main
 > 若报找不到 `git-credential-manager`，把 `E:\xia zai\git\Git\mingw64\bin` 加进
 > `PATH` 再推（`git-credential-manager.exe` 在那里）。
 
-### 5.2 npm 发布：**已作废，不要再试**
+### 5.2 npm 发布：**已恢复**（2026-10-01）
 
-**结论**：作者**个人原因无法注册 npm 账户**，`@huanlin` scope 拿不到，
-`npm publish` 必然以 **403** 失败。这条路已放弃——不要再准备发布材料、不要再登录尝试。
+**结论**：作者后来注册了 npm 账户 **`y9931666`**，npm 渠道恢复。注意 `@huanlin`
+这个 scope 属于**另一个用户**（他在发 `@huanlin/dsh-plugin-sleep` 等同类 DSH 插件），
+所以包名不是 `@huanlin/*`，而是：
 
-- `package.json` 的 `name` / `publishConfig` 保留为仓库内元数据，但 registry 上
-  **不存在**这个包；
-- 仓库历史文档（`release-notes/*`、README 旧版、`wenjian/roundTable/上架操作教程-npm与awesome.md`）
-  里出现的 `dsh plugin --profile web add @huanlin/dsh-plugin-roundtable` **一律不可用**；
-- 用户端唯一安装方式是**源码 / GitHub**：
-  `git clone https://github.com/9931666/dsh-plugin-roundtable` → `pnpm build` →
-  `dsh plugin --profile web add .`
+- `@y9931666/dsh-plugin-roundtable`（圆桌会议）
+- `@y9931666/dsh-plugin-crossfire`（针锋）
 
-### 5.3 实际发行方式：GitHub
+`package.json` 的 `name` / `publishConfig` 已同步改成该 scope；源码、测试断言
+（`test/inject.test.mjs`、`test/version.test.mjs`）、`cordis.patch.yml`、
+`tsdown.config.ts`、`src/version.ts` 的 `PLUGIN_ID`、`scripts/doctor.mjs` 的安装路径
+探测、`scripts/release.mjs` 的说明，全部一起改了 —— **漏掉任何一处都会让
+`bundle 注册的 id 必须与包名一致` 这条测试或运行时加载失败**。
+
+- 仓库历史文档（`release-notes/v0.1.x` 与 `v1.0.0-rc.1`、旧版 README）里
+  `@huanlin/...` 的安装命令**一律不可用**（那是别人的 scope）；
+- 用户端有两条路：npm（`dsh plugin --profile web add @y9931666/dsh-plugin-roundtable@next`，
+  预发布带 `@next`）或源码（`git clone` → `pnpm build` → `dsh plugin add .`）。
+
+### 5.3 实际发行方式：npm + GitHub Release
 
 ```sh
 npm run publish:guard                                # 门禁仍然有效，全绿才算可发
+npm publish                                          # ★ 必须先在本地 pnpm build（lib/ 不进 git）
 git tag v1.0.0-rc.2 && git push origin v1.0.0-rc.2   # Release 的触发点
 ```
 
 `scripts/release.mjs` 只做产物快照（渠道判定 / 防 latest 倒退 / 产物 SHA-256 / 候选 `.tgz`
-写到 `.git/pack-preview/`）；它**完全不调用 npm，也不会自动发布**。
+写到 `.git/pack-preview/`）；它**完全不调用 npm，也不会自动发布** —— `npm publish`
+永远由人显式执行。
 
 ---
 
@@ -266,7 +275,7 @@ git tag v1.0.0-rc.2 && git push origin v1.0.0-rc.2   # Release 的触发点
 | 宿主覆盖 | **仅 0.2 线** | 矩阵只有 `0.2.0-rc.2` 一条；`0.1.5-rc.3` 不再承诺（peer 区间与类型基线各只能有一个），`0.1.6-alpha.*` 从未纳入 |
 | `internal/service` 监听 | 用途未确认 | `src/index.ts` 里那个监听器的实际作用没有查证（行号随本轮改动已变） |
 | 跨 session 越权 | 接受现状 | RPC 通道不暴露调用者 session 身份；单人/单工作区无影响，多人共用同一实例时视作同一信任域 |
-| 包名 scope | **已作废** | 个人原因无法注册 npm 账户 → 不发 npm，发行渠道改为 GitHub（见 §5.2 / §5.3） |
+| 包名 scope | ✅ **已启用** | 账户 `y9931666` 已注册，包名 `@y9931666/dsh-plugin-*` 发布到 npm（见 §5.2 / §5.3）。`@huanlin` 是**别人的** scope，不要再用 |
 
 ---
 

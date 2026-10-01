@@ -5,7 +5,7 @@
  * 解析函数无法被零依赖单测直接 import。这里只留可测的判定，组件（tool-views.tsx）
  * 只负责画。
  *
- * @module @huanlin/dsh-plugin-roundtable/client/tool-views-model
+ * @module @y9931666/dsh-plugin-roundtable/client/tool-views-model
  */
 
 /** Structural view of the owner block this view needs (no host type import). */
