@@ -333,12 +333,15 @@ if (fatalFailures.length > 0) {
 if (doPublish) {
   // 刻意不代发：发布是单向操作（见文件头），脚本只把该敲的命令摆出来。
   process.stdout.write('\n检查全绿。请自行执行发布（脚本不代发）：\n')
-  process.stdout.write(`  npm publish --access public${tag === 'latest' ? '' : ` --tag ${tag}`}\n`)
+  // 预发布版本必须显式 --tag：npm 11 起不再按 -rc.N 后缀自动推断渠道，
+  // 不写会直接失败（"You must specify a tag using --tag ..."）。
+  process.stdout.write(`  npm publish --tag ${tag} --access public${tag === 'latest' ? '' : '   # 预发布必须显式指定标签'}\n`)
   process.stdout.write(`  git tag v${version} && git push origin v${version}\n`)
   process.exit(0)
 }
 
 process.stdout.write('\n检查全绿：这是一份可发布快照（产物 SHA-256 已记录）。\n')
 process.stdout.write('发行渠道：npm 首发，GitHub Release 同 tag 留档。发布前请确认已构建（lib/ 不进 git）：\n')
+process.stdout.write(`  npm publish --tag ${tag} --access public${tag === 'latest' ? '' : '   # 预发布必须显式指定标签'}\n`)
 process.stdout.write(`  git tag v${version} && git push origin v${version}\n`)
 process.stdout.write('（本脚本不调用 npm，也不会替你发布；CI 由 tag 触发 npm publish 与 GitHub Release。）\n')
