@@ -15,7 +15,7 @@
 .label {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.8);
+  color: var(--dsw-alias-label-primary);
 }
 
 .select,
@@ -23,15 +23,15 @@
   font-size: 13px;
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.85);
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
   max-width: 260px;
 }
 
 .hint {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.6;
 }
 
@@ -56,7 +56,7 @@
   width: 36px;
   height: 20px;
   border-radius: 999px;
-  background: rgba(128, 128, 128, 0.35);
+  background: var(--dsw-alias-border-l2);
   transition: background 140ms ease;
   flex: none;
 }
@@ -69,13 +69,16 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
+  /* 保留 #ffffff：滑块是「实底上的前景」（品牌蓝轨道 / 弱灰轨道），13 个令牌里没有
+     on-brand 前景色；深色主题下白滑块在两种轨道上对比都是对的。
+     保留 rgba(0,0,0,0.25)：投影没有对应令牌，换成任何语义色都会渲染错。 */
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   transition: transform 140ms ease;
 }
 
 .switchInput:checked + .switchTrack {
-  background: #4d6bfe;
+  background: var(--dsw-alias-brand-primary);
 }
 
 .switchInput:checked + .switchTrack::after {
@@ -84,16 +87,16 @@
 
 .switchLabel {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .warning {
   font-size: 12px;
-  color: #a06b00;
+  color: var(--dsw-alias-state-warn-primary);
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(214, 158, 46, 0.12);
-  border: 1px solid rgba(214, 158, 46, 0.4);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent);
   line-height: 1.6;
 }
 
@@ -108,7 +111,8 @@
   padding: 7px 18px;
   border-radius: 8px;
   border: none;
-  background: #4d6bfe;
+  background: var(--dsw-alias-brand-primary);
+  /* 保留 #ffffff：品牌实底上的按钮文字，13 个令牌里没有 on-brand 前景色。 */
   color: #ffffff;
   cursor: pointer;
 }
@@ -120,29 +124,29 @@
 
 .saved {
   font-size: 12px;
-  color: #10a37f;
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .failed {
   font-size: 12px;
-  color: #c62828;
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .note {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .sectionDivider {
   height: 1px;
-  background: rgba(128, 128, 128, 0.2);
+  background: var(--dsw-alias-border-l2);
   margin: 2px 0;
 }
 
 .sectionTitle {
   font-size: 13px;
   font-weight: 700;
-  color: rgba(0, 0, 0, 0.75);
+  color: var(--dsw-alias-label-primary);
 }
 
 /* ---------- R3：右栏面板显示（点圆圈决定显示/隐藏） ---------- */
@@ -168,15 +172,15 @@
 
 /* 点亮 = 显示；暗掉 = 隐藏。 */
 .panelToggleOn {
-  border: 1px solid rgba(77, 107, 254, 0.45);
-  background: rgba(77, 107, 254, 0.10);
-  color: rgba(0, 0, 0, 0.8);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
+  color: var(--dsw-alias-label-primary);
 }
 
 .panelToggleOff {
-  border: 1px solid rgba(128, 128, 128, 0.3);
+  border: 1px solid var(--dsw-alias-border-l2);
   background: transparent;
-  color: rgba(0, 0, 0, 0.38);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .panelDot {
@@ -188,12 +192,12 @@
 }
 
 .panelToggleOn .panelDot {
-  background: #4d6bfe;
+  background: var(--dsw-alias-brand-primary);
 }
 
 .panelToggleOff .panelDot {
   background: transparent;
-  border-color: rgba(128, 128, 128, 0.6);
+  border-color: var(--dsw-alias-border-l1);
 }
 
 .panelToggleLabel {
@@ -202,9 +206,9 @@
 
 .feedbackNote {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
-  background: rgba(77, 107, 254, 0.06);
-  border-left: 3px solid rgba(77, 107, 254, 0.3);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent);
   padding: 6px 10px;
   border-radius: 0 8px 8px 0;
   line-height: 1.6;
@@ -220,9 +224,9 @@
 
 .feedbackItem {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.7);
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(128, 128, 128, 0.2);
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 8px 10px;
   line-height: 1.5;
@@ -230,7 +234,7 @@
 
 .feedbackMeta {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .feedbackNoteText {
@@ -243,15 +247,15 @@
   font-size: 12px;
   padding: 4px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(198, 40, 40, 0.4);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent);
   background: transparent;
-  color: #c62828;
+  color: var(--dsw-alias-state-error-primary);
   cursor: pointer;
   align-self: flex-start;
 }
 
 .feedbackClearBtn:hover {
-  background: rgba(198, 40, 40, 0.06);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
 }
 
 /* ---------- B3：用户自建角色预设（扁平、克制，与 panelToggles 同观感） ---------- */
@@ -269,9 +273,9 @@
   align-items: center;
   gap: 10px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.7);
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(128, 128, 128, 0.2);
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 8px 10px;
 }
@@ -287,19 +291,19 @@
 .presetName {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.8);
+  color: var(--dsw-alias-label-primary);
 }
 
 .presetMeta {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.5;
   word-break: break-word;
 }
 
 .presetRoute {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .presetActions {
@@ -312,23 +316,23 @@
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.35);
+  border: 1px solid var(--dsw-alias-border-l2);
   background: transparent;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
 .presetBtn:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .presetDeleteBtn {
-  border-color: rgba(198, 40, 40, 0.35);
-  color: #c62828;
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 35%, transparent);
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .presetDeleteBtn:hover {
-  background: rgba(198, 40, 40, 0.06);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
 }
 
 .presetForm {
@@ -337,8 +341,8 @@
   gap: 8px;
   padding: 10px;
   border-radius: 8px;
-  border: 1px dashed rgba(128, 128, 128, 0.35);
-  background: rgba(0, 0, 0, 0.015);
+  border: 1px dashed var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .presetFormRow {
@@ -358,9 +362,9 @@
   font-size: 13px;
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.85);
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
 }
 
 .presetFormActions {
@@ -374,7 +378,8 @@
   padding: 7px 18px;
   border-radius: 8px;
   border: none;
-  background: #4d6bfe;
+  background: var(--dsw-alias-brand-primary);
+  /* 保留 #ffffff：品牌实底上的按钮文字，13 个令牌里没有 on-brand 前景色。 */
   color: #ffffff;
   cursor: pointer;
   align-self: flex-start;
@@ -384,14 +389,14 @@
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.35);
+  border: 1px solid var(--dsw-alias-border-l2);
   background: transparent;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
 .presetCancelBtn:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 /* ---------- B3+：阵容预设的成员行 ----------

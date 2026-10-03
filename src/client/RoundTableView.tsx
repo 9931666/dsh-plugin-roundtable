@@ -151,13 +151,20 @@ function arrowPoints(x: number, y: number, angle: number, size = 7): string {
   return `${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`
 }
 
+/** 缺陷 6：一条边在「同一源 / 同一汇的扇形束」里的位置。过去 renderEdge 与
+ *  edgeCurveGeometry 各自对 meeting.edges 做 4 次全表扫描，逐边叠加成 O(E²)；
+ *  现在由 edgeFanTable 一次性建表（O(E)），两处都只查表。 */
+interface EdgeFan { fromDegree: number; fromIndex: number; toDegree: number; toIndex: number }
+
+const ZERO_FAN: EdgeFan = { fromDegree: 0, fromIndex: 0, toDegree: 0, toIndex: 0 }
+
 /** Quadratic-bezier geometry for one edge, shared by the renderer (which
  *  draws the path) and the delete dot (which must sit on the curve's true
  *  midpoint, i.e. the point at t=0.5 — not the control point). */
 function edgeCurveGeometry(
   edge: WireEdge,
-  meeting: WireMeeting,
   positions: Map<string, Point>,
+  fan: EdgeFan,
 ): { x1: number; y1: number; x2: number; y2: number; cx: number; cy: number; path: string; mx: number; my: number } | null {
   const from = positions.get(edge.from)
   const to = positions.get(edge.to)
@@ -168,10 +175,7 @@ function edgeCurveGeometry(
   const len = Math.max(1, Math.hypot(dx, dy))
   const ux = dx / len
   const uy = dy / len
-  const fromDegree = meeting.edges.reduce((n, e) => n + (e.from === edge.from ? 1 : 0), 0)
-  const fromIndex = meeting.edges.filter((e) => e.from === edge.from).findIndex((e) => e.id === edge.id)
-  const toDegree = meeting.edges.reduce((n, e) => n + (e.to === edge.to ? 1 : 0), 0)
-  const toIndex = meeting.edges.filter((e) => e.to === edge.to).findIndex((e) => e.id === edge.id)
+  const { fromDegree, fromIndex, toDegree, toIndex } = fan
   const hubFrom = edge.from === 'captain' || edge.from === 'aggregator'
   const hubTo = edge.to === 'captain' || edge.to === 'aggregator'
   const baseAngle = Math.atan2(uy, ux)
@@ -290,6 +294,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const [fetchFailed, setFetchFailed] = useState(false)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
+  // 缺陷 5：拖拽的最新坐标放 ref —— mousemove 读它并同步更新，setDrag 只按 rAF 帧率走，
+  // 于是「落点判定」用的永远是真实指针位置，而渲染不会按鼠标事件频率重建整棵树。
+  const dragRef = useRef<DragState | null>(null)
+  // 缺陷 4：端口的键盘连线起点（null = 未选中）。鼠标拖拽路径与它完全无关。
+  const [kbConnectFrom, setKbConnectFrom] = useState<string | null>(null)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(true)
@@ -545,6 +554,36 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     [meeting, size],
   )
 
+  // 缺陷 6：每条边的「出/入度 + 在扇形束里的序号」只扫一遍 meeting.edges 建成表
+  // （O(E)），renderEdge 与 edgeRemoveDots 共用；过去两处各自逐边扫描全表 → O(E²)。
+  // 序号语义与原实现逐字一致：度数 = 与该边同源（同汇）的边数；序号 = 在
+  // meeting.edges 顺序中同源（同汇）分组内的下标。
+  const edgeFanTable = useMemo(() => {
+    const fans = new Map<string, EdgeFan>()
+    if (meeting === undefined) return fans
+    const outDegree = new Map<string, number>()
+    const inDegree = new Map<string, number>()
+    for (const edge of meeting.edges) {
+      outDegree.set(edge.from, (outDegree.get(edge.from) ?? 0) + 1)
+      inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1)
+    }
+    const outCursor = new Map<string, number>()
+    const inCursor = new Map<string, number>()
+    for (const edge of meeting.edges) {
+      const fromIndex = outCursor.get(edge.from) ?? 0
+      outCursor.set(edge.from, fromIndex + 1)
+      const toIndex = inCursor.get(edge.to) ?? 0
+      inCursor.set(edge.to, toIndex + 1)
+      fans.set(edge.id, {
+        fromDegree: outDegree.get(edge.from) ?? 0,
+        fromIndex,
+        toDegree: inDegree.get(edge.to) ?? 0,
+        toIndex,
+      })
+    }
+    return fans
+  }, [meeting])
+
   // Top-layer delete dots for REAL edges: positioned at each edge's bezier
   // midpoint but rendered ABOVE the nodes (the SVG layer sits under the nodes,
   // so a dot at a midpoint that lands inside a node would be hidden). Shown
@@ -554,12 +593,28 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     const dots: { id: string; cx: number; cy: number }[] = []
     for (const edge of meeting.edges) {
       if (edge.id.startsWith('synthetic:')) continue
-      const geo = edgeCurveGeometry(edge, meeting, positions)
+      const geo = edgeCurveGeometry(edge, positions, edgeFanTable.get(edge.id) ?? ZERO_FAN)
       if (geo === null) continue
       dots.push({ id: edge.id, cx: geo.mx, cy: geo.my })
     }
     return dots
-  }, [meeting, positions])
+  }, [meeting, positions, edgeFanTable])
+
+  // 缺陷 4/5 共用：连线 RPC 只此一处 —— 鼠标拖拽的 mouseup 与端口的键盘激活走同一条
+  // 路径，避免键盘与鼠标两套实现各自漂移。
+  const connectNodes = useCallback((from: string, to: string, meetingId: string): void => {
+    if (from === to) return
+    void rpc<unknown>('roundtable/edge.add', { meetingId, from, to, direction: 'forward' })
+      .then((result) => {
+        if (result.ok) {
+          setToast({ kind: 'ok', text: `已连接 ${from} → ${to}` })
+          void refresh()
+        } else {
+          setToast({ kind: 'err', text: result.error?.message ?? '连线失败' })
+        }
+      })
+      .catch(() => setToast({ kind: 'err', text: '连线失败：无法连接会议服务' }))
+  }, [rpc, refresh])
 
   // Drag-to-connect: follow the pointer and drop on a target node. All drag
   // coordinates are canvas-relative (node positions are canvas-relative too),
@@ -571,20 +626,42 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // landing on an edge path or port dot — DOM closest()/elementFromPoint can
   // miss the node under a line, which is exactly why user↔pm wiring failed
   // silently before. Coordinate hit-testing cannot be blocked by a line.
+  //
+  // 缺陷 5：mousemove 不再每个事件都 setDrag（那会按鼠标事件频率重建整棵子树，含边
+  // 几何与时间戳），改为 rAF 合帧 —— 每帧最多一次 setState；最新坐标写在 dragRef 里，
+  // 所以合帧不会让落点滞后。依赖数组也从 `drag` 换成「是否在拖拽」这个布尔量：原来
+  // 每移动一像素就拆掉并重挂一对 window 监听器。
+  const dragging = drag !== null
   useEffect(() => {
-    if (drag === null) return
+    if (!dragging) return
+    let frame = 0
+    let pending: { x: number; y: number } | null = null
+    const flush = (): void => {
+      frame = 0
+      if (pending === null) return
+      const next = pending
+      pending = null
+      setDrag((previous) => previous === null ? null : { ...previous, x: next.x, y: next.y })
+    }
     const move = (event: MouseEvent): void => {
       const rect = containerRef.current?.getBoundingClientRect()
       const x = rect === undefined ? event.clientX : event.clientX - rect.left
       const y = rect === undefined ? event.clientY : event.clientY - rect.top
-      setDrag((previous) => previous === null ? null : { ...previous, x, y })
+      // 命中判定用的坐标在这里同步记录（不经过 rAF），保证 mouseup 拿到真实落点。
+      const current = dragRef.current
+      if (current !== null) dragRef.current = { ...current, x, y }
+      pending = { x, y }
+      if (frame === 0) frame = window.requestAnimationFrame(flush)
     }
-    const up = (event: MouseEvent): void => {
-      const from = drag.from
-      const meetingId = drag.meetingId
-      const x = drag.x
-      const y = drag.y
+    const up = (): void => {
+      const current = dragRef.current
+      dragRef.current = null
       setDrag(null)
+      if (current === null) return
+      const from = current.from
+      const meetingId = current.meetingId
+      const x = current.x
+      const y = current.y
       // Find the nearest node to the release point within a generous radius.
       let bestKey: string | null = null
       let bestDist = Number.POSITIVE_INFINITY
@@ -598,24 +675,20 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       }
       const to = bestKey
       if (to === null || to === from || bestDist > hitRadius) return
-      void rpc<unknown>('roundtable/edge.add', { meetingId, from, to, direction: 'forward' })
-        .then((result) => {
-          if (result.ok) {
-            setToast({ kind: 'ok', text: `已连接 ${from} → ${to}` })
-            void refresh()
-          } else {
-            setToast({ kind: 'err', text: result.error?.message ?? '连线失败' })
-          }
-        })
-        .catch(() => setToast({ kind: 'err', text: '连线失败：无法连接会议服务' }))
+      connectNodes(from, to, meetingId)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     return () => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // 丢掉排队中的那一帧之前先应用它，避免「指针正好停下时线停在上一帧坐标」。
+      if (frame !== 0) {
+        window.cancelAnimationFrame(frame)
+        flush()
+      }
     }
-  }, [drag, refresh, rpc, positions])
+  }, [dragging, connectNodes, positions])
 
   // Recent messages (≤3s old) drive a one-shot flow pulse along their edge.
   const activeMessages = useMemo(() => {
@@ -922,10 +995,8 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     // ribs from the same rim point instead of stabbing every direction; this
     // is the "start from one anchor, split toward many ends" look. We offset
     // each edge's start tangent by its index within the origin's bundle.
-    const fromDegree = meeting.edges.reduce((n, e) => n + (e.from === edge.from ? 1 : 0), 0)
-    const fromIndex = meeting.edges.filter((e) => e.from === edge.from).findIndex((e) => e.id === edge.id)
-    const toDegree = meeting.edges.reduce((n, e) => n + (e.to === edge.to ? 1 : 0), 0)
-    const toIndex = meeting.edges.filter((e) => e.to === edge.to).findIndex((e) => e.id === edge.id)
+    // 缺陷 6：序号/度数来自一次性建好的 edgeFanTable，不再逐边扫描全表。
+    const { fromDegree, fromIndex, toDegree, toIndex } = edgeFanTable.get(edge.id) ?? ZERO_FAN
 
     // Directional unit vector source -> target.
     const dx = to.x - from.x
@@ -1013,7 +1084,27 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       const rect = containerRef.current?.getBoundingClientRect()
       const x = rect === undefined ? clientX : clientX - rect.left
       const y = rect === undefined ? clientY : clientY - rect.top
-      setDrag({ from: key, meetingId: meeting.id, x, y })
+      const next: DragState = { from: key, meetingId: meeting.id, x, y }
+      // 缺陷 5：ref 与 state 同时建立；之后 mousemove 只更新 ref，state 按帧同步。
+      dragRef.current = next
+      setDrag(next)
+    }
+    // 缺陷 4：端口的完整键盘路径。第一个 Enter 选中起点，在另一个节点的端口上再按
+    // Enter 落点（落点判定与鼠标一致、是节点级的，所以 n/e/s/w 四个端口在键盘下等价）；
+    // 同一个节点再按 Enter 或按 Esc 取消。这是一条真能走通的路径，不是半成品。
+    const activatePortByKeyboard = (): void => {
+      if (kbConnectFrom === null) {
+        setKbConnectFrom(key)
+        setToast({ kind: 'ok', text: `已选中连线起点 ${key}，请在目标节点的端口上按 Enter（Esc 取消）` })
+        return
+      }
+      if (kbConnectFrom === key) {
+        setKbConnectFrom(null)
+        return
+      }
+      const from = kbConnectFrom
+      setKbConnectFrom(null)
+      connectNodes(from, key, meeting.id)
     }
     return (
       <div
@@ -1045,7 +1136,10 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         ) : null}
         {/* Connection ports: a small hit-dot on each side of the node, like a
             Dify workflow port. Drag from one to wire a directed edge. The dots
-            sit on the node rim so the wire visibly "grows out of" the expert. */}
+            sit on the node rim so the wire visibly "grows out of" the expert.
+            缺陷 4：端口带着 role="button" + tabIndex=0（CSS 还专门做了
+            :focus-visible），因此它必须能被键盘真的走通 —— Enter/空格选中起点，
+            在另一个节点的端口上 Enter 落点，Esc 取消。 */}
         {(['n', 'e', 's', 'w'] as const).map((dir) => (
           <div
             key={dir}
@@ -1053,17 +1147,49 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             role="button"
             tabIndex={0}
             aria-label="connect"
+            aria-pressed={kbConnectFrom === key}
             data-port-dir={dir}
             onMouseDown={(event) => {
               event.preventDefault()
               event.stopPropagation()
               startDrag(event.clientX, event.clientY)
             }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                if (kbConnectFrom !== null) {
+                  event.preventDefault()
+                  setKbConnectFrom(null)
+                }
+                return
+              }
+              if (event.key !== 'Enter' && event.key !== ' ') return
+              event.preventDefault()
+              event.stopPropagation()
+              activatePortByKeyboard()
+            }}
           />
         ))}
       </div>
     )
   }
+
+  // 缺陷 3：KB / 管理 / 评审三个弹窗的遮罩都是 position:fixed + z-index 1200，而 toast
+  // 唯一渲染点在 .canvas 内部 —— .canvas 是 position:relative 且 z-index:auto，不新建
+  // 层叠上下文，所以 toast 的 z-index 6 与遮罩的 1200 是在同一个层叠上下文里比大小：
+  // 6 < 1200，弹窗一开 toast 就被整屏遮罩压在下面。用户在弹窗里点「支持」或空理由点
+  // 「确认驳回」看不到任何回执，三条为弹窗写的文案在界面上不可达。遮罩的 z-index 在
+  // RoundTableView.module.css（别人的文件，动不得），所以这里把同一份 toast 在有弹窗时
+  // 挂到 .root 直属层级，用内联 fixed + z-index 1300 顶到遮罩之上（与遮罩同一套定位
+  // 坐标系）；无弹窗时仍留在画布顶部居中，观感零变化。
+  const overlayOpen = kbOpen || manageOpen || (reviewOpen && meeting?.review !== null)
+  const renderToast = (): JSX.Element | null => toast === null ? null : (
+    <div
+      className={styles.toast}
+      style={overlayOpen ? { position: 'fixed', zIndex: 1300 } : undefined}
+    >
+      <span className={toast.kind === 'ok' ? styles.toastOk : styles.toastErr}>{toast.text}</span>
+    </div>
+  )
 
   return (
     <div className={styles.root}>
@@ -1209,11 +1335,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               <div className={styles.canvasLegendHint}>{translate('legendPorts')}</div>
             </div>
           )}
-          {toast !== null ? (
-            <div className={styles.toast}>
-              <span className={toast.kind === 'ok' ? styles.toastOk : styles.toastErr}>{toast.text}</span>
-            </div>
-          ) : null}
+          {overlayOpen ? null : renderToast()}
         </div>
         <details className={styles.digest}>
           <summary>{translate('gatewayDigest')}</summary>
@@ -1882,6 +2004,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </div>
         </div>
       ) : null}
+      {overlayOpen ? renderToast() : null}
       {fetchFailed === true ? <div className={styles.fetchFailed}>{translate('fetchFailed')}</div> : null}
     </div>
   )

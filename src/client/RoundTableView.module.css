@@ -40,9 +40,9 @@
   font-size: 12px;
   padding: 2px 6px;
   border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.45);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
   max-width: 220px;
 }
 
@@ -50,13 +50,13 @@
   font-size: 11px;
   padding: 1px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(128, 128, 128, 0.35);
-  color: rgba(0, 0, 0, 0.65);
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .round {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--dsw-alias-label-secondary);
 }
 
 /* 标题区「针锋相对」入口：可点击打开评审窗口 */
@@ -64,16 +64,16 @@
   font-size: 11px;
   padding: 2px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(198, 40, 40, 0.45);
-  background: rgba(198, 40, 40, 0.06);
-  color: #c62828;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
+  color: var(--dsw-alias-state-error-primary);
   cursor: pointer;
   font-weight: 600;
   transition: background 120ms ease;
 }
 
 .reviewBadge:hover {
-  background: rgba(198, 40, 40, 0.14);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
 }
 
 /* 右栏「分针记录」摘要卡片：可点击打开评审窗口 */
@@ -83,22 +83,22 @@
   gap: 4px;
   text-align: left;
   width: 100%;
-  border: 1px solid rgba(198, 40, 40, 0.25);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 25%, transparent);
   border-radius: 8px;
-  background: rgba(198, 40, 40, 0.05);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 5%, transparent);
   padding: 8px 10px;
   cursor: pointer;
   transition: background 120ms ease;
 }
 
 .reviewCard:hover {
-  background: rgba(198, 40, 40, 0.1);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
 }
 
 .reviewCardTitle {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.8);
+  color: var(--dsw-alias-label-primary);
   line-height: 1.45;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -108,7 +108,7 @@
 
 .reviewCardMeta {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
 }
 
 /* 会议删除按钮：固定在右栏顶部操作条（不再挤在标题行最右，窄屏也能看到）。 */
@@ -119,9 +119,9 @@
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.35);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   opacity: 0.75;
   transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease;
@@ -129,8 +129,8 @@
 
 .meetingDelete:hover {
   opacity: 1;
-  border-color: #c62828;
-  color: #c62828;
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .budgetRow {
@@ -142,32 +142,34 @@
 
 .budgetLabel {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .budgetBar {
   width: 90px;
   height: 5px;
   border-radius: 999px;
-  background: rgba(128, 128, 128, 0.18);
+  background: color-mix(in srgb, var(--dsw-alias-label-secondary) 18%, transparent);
   overflow: hidden;
 }
 
 .budgetFill {
   height: 100%;
   border-radius: 999px;
-  background: #4d6bfe;
+  /* 蓝色强调用宿主的真实强调色令牌（浅色 #4176e6 / 深色 deepseek-450），
+     不用 --dsw-alias-brand-primary —— 后者是随主题翻转的近黑/近白单色。 */
+  background: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
 }
 
 .budgetFillTokens {
   height: 100%;
   border-radius: 999px;
-  background: #10a37f;
+  background: var(--dsw-alias-state-success-primary);
 }
 
 .budgetValue {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.65);
+  color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -178,20 +180,20 @@
   flex-wrap: wrap;
   padding: 6px 10px;
   border-radius: 8px;
-  background: rgba(214, 158, 46, 0.12);
-  border: 1px solid rgba(214, 158, 46, 0.4);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent);
 }
 
 .decisionTag {
   font-size: 11px;
   font-weight: 600;
-  color: #a06b00;
+  color: var(--dsw-alias-state-warn-primary);
   flex: none;
 }
 
 .decisionQuestion {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.75);
+  color: var(--dsw-alias-label-primary);
 }
 
 /* ---------- topology canvas ---------- */
@@ -202,8 +204,8 @@
   min-width: 320px;
   min-height: 420px;
   border-radius: 12px;
-  background: #fafafa;
-  border: 1px solid rgba(128, 128, 128, 0.15);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
   overflow: hidden;
 }
 
@@ -223,9 +225,9 @@
   /* 右侧留出叉号的位置，避免文字压到关闭按钮下面。 */
   padding: 7px 24px 7px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(128, 128, 128, 0.22);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
   pointer-events: none;
   line-height: 1.5;
 }
@@ -247,31 +249,31 @@
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: rgba(0, 0, 0, 0.4);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   pointer-events: auto;
 }
 
 .canvasLegendClose:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: rgba(0, 0, 0, 0.75);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+  color: var(--dsw-alias-label-primary);
 }
 
 .canvasLegendTitle {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.62);
+  color: var(--dsw-alias-label-secondary);
   margin-bottom: 2px;
 }
 
 .canvasLegendRow {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.72);
+  color: var(--dsw-alias-label-primary);
 }
 
 .canvasLegendHint {
   font-size: 10.5px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
   margin-top: 2px;
 }
 
@@ -300,8 +302,8 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #c62828;
-  border: 1.5px solid #ffffff;
+  background: var(--dsw-alias-state-error-primary);
+  border: 1.5px solid var(--dsw-alias-brand-primary);
   color: #ffffff;
   font-size: 12px;
   display: flex;
@@ -314,7 +316,7 @@
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 1px 5px color-mix(in srgb, var(--dsw-alias-label-primary) 28%, transparent);
 }
 
 .edgeRemoveActive {
@@ -325,76 +327,76 @@
 .edgeRemove:hover {
   opacity: 1;
   pointer-events: auto;
-  background: #b71c1c;
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 85%, transparent);
 }
 
 .edgeForward {
-  stroke: rgba(90, 90, 90, 0.5);
+  stroke: var(--dsw-alias-border-l1);
   stroke-width: 1.5;
 }
 
 .edgeBidirectional {
-  stroke: rgba(77, 107, 254, 0.7);
+  stroke: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 70%, transparent);
   stroke-width: 1.6;
 }
 
 .edgeArrow {
-  fill: rgba(90, 90, 90, 0.7);
+  fill: var(--dsw-alias-border-l1);
 }
 
 .edgeSynthetic {
-  stroke: rgba(90, 90, 90, 0.28);
+  stroke: var(--dsw-alias-border-l2);
   stroke-width: 1.3;
   stroke-dasharray: 4 4;
 }
 
 .edgeArrowSynthetic {
-  fill: rgba(90, 90, 90, 0.38);
+  fill: var(--dsw-alias-border-l2);
 }
 
 /* Role-based accents so the topology reads at a glance: captain is the single
    "everything radiates from here" hub (warm gold), aggregator is the sink
    (cool teal), and expert↔expert wires stay neutral grey. */
 .edgeCaptain {
-  stroke: rgba(214, 158, 46, 0.85);
+  stroke: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 85%, transparent);
   stroke-width: 1.8;
 }
 
 .edgeAggregator {
-  stroke: rgba(16, 163, 127, 0.8);
+  stroke: color-mix(in srgb, var(--dsw-alias-state-success-primary) 80%, transparent);
   stroke-width: 1.6;
 }
 
 .edgeSyntheticCaptain {
-  stroke: rgba(214, 158, 46, 0.45);
+  stroke: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 45%, transparent);
   stroke-width: 1.4;
   stroke-dasharray: 4 4;
 }
 
 .edgeSyntheticAggregator {
-  stroke: rgba(16, 163, 127, 0.4);
+  stroke: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent);
   stroke-width: 1.4;
   stroke-dasharray: 4 4;
 }
 
 .edgeArrowCaptain {
-  fill: rgba(214, 158, 46, 0.9);
+  fill: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 90%, transparent);
 }
 
 .edgeArrowAggregator {
-  fill: rgba(16, 163, 127, 0.85);
+  fill: color-mix(in srgb, var(--dsw-alias-state-success-primary) 85%, transparent);
 }
 
 .edgeArrowSyntheticCaptain {
-  fill: rgba(214, 158, 46, 0.5);
+  fill: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 50%, transparent);
 }
 
 .edgeArrowSyntheticAggregator {
-  fill: rgba(16, 163, 127, 0.45);
+  fill: color-mix(in srgb, var(--dsw-alias-state-success-primary) 45%, transparent);
 }
 
 .dragLine {
-  stroke: #4d6bfe;
+  stroke: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
   stroke-width: 1.6;
   stroke-dasharray: 5 4;
   pointer-events: none;
@@ -408,8 +410,10 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #4d6bfe;
-  box-shadow: 0 0 10px 2px rgba(77, 107, 254, 0.7);
+              /* 与下方辉光同一强调蓝：此前填 brand-primary（随主题翻成近白），
+     深色下会变成"蓝辉光围着近白圆点"——不一致，且圆点在浅底上不可见。 */
+  background: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  box-shadow: 0 0 10px 2px color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 70%, transparent);
   pointer-events: none;
   z-index: 4;
   animation: rt-msg-flow 1.1s ease-out forwards;
@@ -437,9 +441,9 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
-  background: #ffffff;
-  border: 1.5px solid rgba(120, 120, 120, 0.4);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
   user-select: none;
   z-index: 2;
 }
@@ -450,11 +454,11 @@
   border-radius: 12px;
   background: #202124;
   border: none;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--dsw-alias-label-primary) 25%, transparent);
 }
 
 .captainNode .nodeLabel {
-  color: #e8eaed;
+  color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   font-weight: 600;
   text-align: center;
@@ -465,13 +469,13 @@
   width: 74px;
   height: 74px;
   border-radius: 14px;
-  background: #f3f4f6;
-  border: 1.5px dashed rgba(120, 120, 120, 0.5);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1.5px dashed var(--dsw-alias-border-l2);
 }
 
 .nodeLabel {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--dsw-alias-label-primary);
   text-align: center;
   line-height: 1.3;
   max-width: 62px;
@@ -500,7 +504,7 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent);
 }
 
 /* 厂商 logo 图：圆形裁切 + contain 防切边，品牌色底垫在透明图后面。 */
@@ -528,7 +532,7 @@
    完整语义交给 title（activityLifecycleHint）与右栏列表的悬停提示。 */
 .nodeMeta {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
   min-height: 12px;
   max-width: calc(100% - 4px);
   white-space: nowrap;
@@ -537,20 +541,20 @@
 }
 
 .nodeMetaWorking {
-  color: #10a37f;
+  color: var(--dsw-alias-state-success-primary);
 }
 
 /* A node that was added then removed: keep it visible so the topology still
    shows which models participated, but degrade it (greyed, no pulse, muted). */
 .nodeRemoved {
-  background: #f4f4f4;
-  border-color: rgba(128, 128, 128, 0.35);
+  background: var(--dsw-alias-bg-layer-2);
+  border-color: var(--dsw-alias-border-l2);
   box-shadow: none;
   opacity: 0.72;
 }
 
 .nodeRemoved .nodeLabel {
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   text-decoration: line-through;
 }
 
@@ -566,12 +570,12 @@
 
 @keyframes roundtable-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(77, 107, 254, 0.28), 0 2px 8px rgba(0, 0, 0, 0.08);
-    border-color: rgba(77, 107, 254, 0.75);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 28%, transparent), 0 2px 8px color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+    border-color: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 75%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 9px rgba(77, 107, 254, 0), 0 2px 8px rgba(0, 0, 0, 0.08);
-    border-color: rgba(77, 107, 254, 0.45);
+    box-shadow: 0 0 0 9px color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 0%, transparent), 0 2px 8px color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+    border-color: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 45%, transparent);
   }
 }
 
@@ -584,9 +588,9 @@
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid #4d6bfe;
-  box-shadow: 0 0 0 2px rgba(77, 107, 254, 0.15);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 2px solid var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 15%, transparent);
   cursor: crosshair;
   opacity: 0;
   transition: opacity 120ms ease, transform 120ms ease, box-shadow 120ms ease;
@@ -600,8 +604,9 @@
 
 .port:hover {
   transform: scale(1.25);
-  box-shadow: 0 0 0 4px rgba(77, 107, 254, 0.28);
-  background: #4d6bfe;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 28%, transparent);
+  /* 与描边同一强调蓝：此前填 brand-primary，深色下会与蓝色描边自相矛盾。 */
+  background: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
 }
 
 /* Placement: centered on each rim, slightly outside the 68px circle. */
@@ -630,9 +635,9 @@
 
 .digest {
   flex: none;
-  border: 1px solid rgba(128, 128, 128, 0.2);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 10px;
-  background: #fdfdfd;
+  background: var(--dsw-alias-bg-layer-2);
   font-size: 12px;
 }
 
@@ -640,7 +645,7 @@
   cursor: pointer;
   padding: 6px 10px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .digestBody {
@@ -651,7 +656,7 @@
   font-family: inherit;
   white-space: pre-wrap;
   word-break: break-word;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--dsw-alias-label-secondary);
 }
 
 /* ---------- sidebar ---------- */
@@ -677,9 +682,9 @@
 
 .pendingBadge {
   font-size: 11px;
-  color: #b26a00;
-  background: rgba(255, 193, 7, 0.14);
-  border: 1px solid rgba(255, 193, 7, 0.5);
+  color: var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 50%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -691,16 +696,16 @@
 /* 专家行"待移除"标记（用户已删除、主持人下一轮执行）。 */
 .agentQueuedRemove {
   font-size: 10px;
-  color: #b26a00;
+  color: var(--dsw-alias-state-warn-primary);
   flex: none;
   font-weight: 600;
 }
 
 .panel {
   flex: none;
-  border: 1px solid rgba(128, 128, 128, 0.18);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 10px;
-  background: #fdfdfd;
+  background: var(--dsw-alias-bg-layer-2);
   overflow: hidden;
 }
 
@@ -709,23 +714,23 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.12);
-  background: #fafafa;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .panelTitle {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .panelAdd {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 16px;
   text-align: center;
@@ -735,8 +740,8 @@
 }
 
 .panelAdd:hover {
-  border-color: #4d6bfe;
-  color: #4d6bfe;
+  border-color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
 }
 
 .panelBody {
@@ -778,12 +783,12 @@
 .agentName {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--dsw-alias-label-primary);
 }
 
 .agentRole {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -791,13 +796,13 @@
 
 .agentStatus {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
   flex: none;
 }
 
 .agentStatusWorking {
   font-size: 10px;
-  color: #10a37f;
+  color: var(--dsw-alias-state-success-primary);
   flex: none;
   font-weight: 600;
 }
@@ -812,13 +817,13 @@
 }
 
 .agentRowRemoved .agentName {
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   text-decoration: line-through;
 }
 
 .agentStatusRemoved {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.4);
+  color: var(--dsw-alias-label-secondary);
   font-style: italic;
   flex: none;
 }
@@ -842,12 +847,12 @@
 }
 
 .taskToggle:hover {
-  background: rgba(77, 107, 254, 0.08);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 8%, transparent);
 }
 
 .taskChevron {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--dsw-alias-label-secondary);
   width: 12px;
   flex: none;
 }
@@ -855,13 +860,13 @@
 .taskKey {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.75);
+  color: var(--dsw-alias-label-primary);
 }
 
 /* Collapsed: always a single line with an ellipsis, regardless of length. */
 .taskRole {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -871,7 +876,7 @@
 /* Expanded: full role, wrapped. */
 .taskRoleExpanded {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
@@ -879,7 +884,7 @@
 
 .panelEmpty {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.5;
 }
 
@@ -888,7 +893,7 @@
   flex-direction: column;
   gap: 2px;
   padding-bottom: 6px;
-  border-bottom: 1px dashed rgba(128, 128, 128, 0.15);
+  border-bottom: 1px dashed var(--dsw-alias-border-l2);
 }
 
 .logRow:last-child {
@@ -905,18 +910,18 @@
 .logFrom {
   font-size: 10px;
   font-weight: 600;
-  color: rgba(77, 107, 254, 0.9);
+  color: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 90%, transparent);
 }
 
 .logTime {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.4);
+  color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
 
 .logText {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.65);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.45;
 }
 
@@ -926,10 +931,10 @@
   position: fixed;
   z-index: 1000;
   min-width: 170px;
-  background: #ffffff;
-  border: 1px solid rgba(128, 128, 128, 0.3);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -937,9 +942,9 @@
 
 .contextMenuTitle {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   padding: 4px 10px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
   margin-bottom: 4px;
 }
 
@@ -952,19 +957,19 @@
   padding: 7px 10px;
   border-radius: 6px;
   cursor: pointer;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--dsw-alias-label-primary);
 }
 
 .contextMenuItem:hover {
-  background: rgba(77, 107, 254, 0.1);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 10%, transparent);
 }
 
 .contextMenuItemDanger {
-  color: #c62828;
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .contextMenuItemDanger:hover {
-  background: rgba(198, 40, 40, 0.08);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
 }
 
 /* ---------- empty / error ---------- */
@@ -983,19 +988,19 @@
 .emptyTitle {
   font-size: 15px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.75);
+  color: var(--dsw-alias-label-primary);
 }
 
 .emptyHint {
   font-size: 13px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   max-width: 420px;
   line-height: 1.6;
 }
 
 .fetchFailed {
   font-size: 11px;
-  color: #c62828;
+  color: var(--dsw-alias-state-error-primary);
 }
 
 /* Connect-result toast: a short-lived banner at the top of the topology
@@ -1010,11 +1015,11 @@
   transform: translateX(-50%);
   z-index: 6;
   max-width: 90%;
-  background: #ffffff;
-  border: 1px solid rgba(128, 128, 128, 0.35);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 8px 16px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--dsw-alias-label-primary) 18%, transparent);
   pointer-events: none;
   display: flex;
   align-items: center;
@@ -1026,13 +1031,13 @@
 
 .toastOk {
   font-size: 12.5px;
-  color: #1a1a1a;
+  color: var(--dsw-alias-label-primary);
   font-weight: 500;
 }
 
 .toastErr {
   font-size: 12.5px;
-  color: #b3261e;
+  color: var(--dsw-alias-state-error-primary);
   font-weight: 500;
 }
 
@@ -1042,7 +1047,7 @@
   position: fixed;
   inset: 0;
   z-index: 1200;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--dsw-alias-bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1053,9 +1058,9 @@
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 48px);
   overflow-y: auto;
-  background: #ffffff;
+  background: var(--dsw-alias-bg-layer-1);
   border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1065,14 +1070,14 @@
 .manageTitle {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--dsw-alias-label-primary);
 }
 
 .managePendingNote {
   font-size: 11px;
-  color: #7a5b00;
-  background: rgba(255, 193, 7, 0.12);
-  border: 1px solid rgba(255, 193, 7, 0.45);
+  color: var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 45%, transparent);
   border-radius: 8px;
   padding: 6px 10px;
   line-height: 1.5;
@@ -1081,7 +1086,7 @@
 .manageSectionTitle {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--dsw-alias-label-secondary);
   margin-top: 2px;
 }
 
@@ -1091,10 +1096,10 @@
   gap: 6px;
   max-height: 220px;
   overflow-y: auto;
-  border: 1px solid rgba(128, 128, 128, 0.15);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 8px;
-  background: #fafafa;
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .manageRow {
@@ -1111,22 +1116,22 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  background: rgba(255, 193, 7, 0.25);
-  color: #b26a00;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 25%, transparent);
+  color: var(--dsw-alias-state-warn-primary);
   font-size: 14px;
   font-weight: 700;
 }
 
 .manageStatusTag {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
   flex: none;
 }
 
 .managePendingTag {
   font-size: 10px;
-  color: #b26a00;
-  background: rgba(255, 193, 7, 0.15);
+  color: var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 15%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   flex: none;
@@ -1137,25 +1142,25 @@
   font-size: 11px;
   padding: 2px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(198, 40, 40, 0.4);
-  background: #ffffff;
-  color: #c62828;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-state-error-primary);
   cursor: pointer;
   flex: none;
 }
 
 .manageRemoveBtn:hover {
-  background: rgba(198, 40, 40, 0.08);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
 }
 
 .manageForm {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.15);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 10px;
-  background: #fafafa;
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .manageFormRow {
@@ -1166,7 +1171,7 @@
 
 .manageLabel {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.65);
+  color: var(--dsw-alias-label-secondary);
   width: 40px;
   flex: none;
 }
@@ -1177,9 +1182,9 @@
   font-size: 12px;
   padding: 4px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.85);
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
 }
 
 .manageSelect {
@@ -1188,9 +1193,9 @@
   font-size: 12px;
   padding: 3px 6px;
   border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.85);
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
 }
 
 .manageAddBtn {
@@ -1199,13 +1204,16 @@
   padding: 4px 14px;
   border-radius: 6px;
   border: none;
-  background: #4d6bfe;
-  color: #ffffff;
+  background: var(--dsw-alias-brand-primary);
+  /* 填充的反色，而不是写死的白字：brand-primary 随主题翻转（浅色近黑 / 深色近白），
+     写死 #ffffff 会在深色下变成"白字压近白底"。该令牌是宿主 primitives 标准的
+     "填充上的文字色"（浅色 #fff / 深色 #0f1115），语义正确。 */
+  color: var(--dsw-alias-label-primary-foreground);
   cursor: pointer;
 }
 
 .manageAddBtn:hover {
-  background: #3b58e8;
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 85%, transparent);
 }
 
 .manageFooter {
@@ -1213,13 +1221,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-top: 1px solid rgba(128, 128, 128, 0.15);
+  border-top: 1px solid var(--dsw-alias-border-l2);
   padding-top: 10px;
 }
 
 .manageHint {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1.5;
 }
 
@@ -1227,16 +1235,16 @@
   font-size: 12px;
   padding: 4px 14px;
   border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.35);
-  background: #ffffff;
-  color: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   flex: none;
 }
 
 .manageCloseBtn:hover {
-  border-color: #4d6bfe;
-  color: #4d6bfe;
+  border-color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
 }
 
 /* ---------- 右栏面板可见性（R3：设置页点圆圈决定显示） ---------- */
@@ -1251,15 +1259,15 @@
 /* skill 传递方式的简短标注（与面板标题同一行，保持界面工整）。 */
 .skillDeliveryLabel {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
   font-weight: 400;
 }
 
 .kbPathRow {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.65);
-  background: rgba(77, 107, 254, 0.07);
-  border: 1px solid rgba(77, 107, 254, 0.25);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 25%, transparent);
   border-radius: 6px;
   padding: 5px 8px;
   white-space: nowrap;
@@ -1272,10 +1280,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.15);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 10px;
-  background: #fafafa;
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .kbChangedRow {
@@ -1283,13 +1291,13 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   user-select: none;
 }
 
 .switchInput {
-  accent-color: #4d6bfe;
+  accent-color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
   cursor: pointer;
 }
 
@@ -1299,10 +1307,10 @@
   gap: 4px;
   max-height: 240px;
   overflow-y: auto;
-  border: 1px solid rgba(128, 128, 128, 0.15);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 8px;
-  background: #fafafa;
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .kbRow {
@@ -1322,7 +1330,7 @@
 .kbName {
   flex: 1;
   min-width: 0;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--dsw-alias-label-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1330,13 +1338,13 @@
 
 .kbMeta {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--dsw-alias-label-secondary);
   flex: none;
 }
 
 .kbError {
   font-size: 12px;
-  color: #c62828;
+  color: var(--dsw-alias-state-error-primary);
   line-height: 1.5;
 }
 
@@ -1347,9 +1355,9 @@
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 48px);
   overflow-y: auto;
-  background: #ffffff;
+  background: var(--dsw-alias-bg-layer-1);
   border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1367,7 +1375,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border-right: 1px solid rgba(128, 128, 128, 0.15);
+  border-right: 1px solid var(--dsw-alias-border-l2);
   padding-right: 12px;
   max-height: 60vh;
   overflow-y: auto;
@@ -1384,15 +1392,15 @@
 .reviewSectionTitle {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .reviewQuestion {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
-  background: rgba(77, 107, 254, 0.07);
-  border: 1px solid rgba(77, 107, 254, 0.25);
+  color: var(--dsw-alias-label-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 25%, transparent);
   border-radius: 8px;
   padding: 8px 10px;
   white-space: pre-wrap;
@@ -1402,9 +1410,9 @@
 
 .reviewPlan {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.75);
-  background: #fafafa;
-  border: 1px solid rgba(128, 128, 128, 0.18);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   padding: 8px 10px;
   white-space: pre-wrap;
@@ -1422,10 +1430,10 @@
 }
 
 .reviewItem {
-  border: 1px solid rgba(128, 128, 128, 0.18);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 10px;
   padding: 10px 12px;
-  background: #fdfdfd;
+  background: var(--dsw-alias-bg-layer-2);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1440,14 +1448,14 @@
 .reviewNode {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.8);
+  color: var(--dsw-alias-label-primary);
   flex: 1;
 }
 
 .reviewSeq {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.6);
-  background: rgba(0, 0, 0, 0.06);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   font-weight: 600;
@@ -1456,8 +1464,8 @@
 
 .reviewEndorsed {
   font-size: 10px;
-  color: #c62828;
-  background: rgba(198, 40, 40, 0.08);
+  color: var(--dsw-alias-state-success-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 8%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   font-weight: 600;
@@ -1465,7 +1473,7 @@
 
 .reviewContent {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.8);
+  color: var(--dsw-alias-label-primary);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1476,34 +1484,37 @@
   justify-content: flex-end;
 }
 
+/* 表态三态的语义配色：认定（endorsed / support）= 绿系，驳回（rejected / reject）= 红系。
+   与针锋 Crossfire 插件的约定保持一致（认定=绿、驳回=红），
+   避免同一用户在两个插件之间切换时反向读数。不要改回去。 */
 .reviewSupport {
   font-size: 11px;
   padding: 4px 12px;
   border-radius: 6px;
-  border: 1px solid rgba(198, 40, 40, 0.45);
-  background: #ffffff;
-  color: #c62828;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 45%, transparent);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-state-success-primary);
   cursor: pointer;
 }
 
 .reviewSupport:hover {
-  background: rgba(198, 40, 40, 0.08);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 8%, transparent);
 }
 
 .reviewSupportDone {
   font-size: 11px;
   padding: 4px 12px;
   border-radius: 6px;
-  border: 1px solid rgba(198, 40, 40, 0.3);
-  background: rgba(198, 40, 40, 0.08);
-  color: #c62828;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 8%, transparent);
+  color: var(--dsw-alias-state-success-primary);
   cursor: default;
 }
 
 .reviewDimension {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.55);
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -1511,9 +1522,9 @@
 
 .reviewQuote {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
-  background: rgba(0, 0, 0, 0.04);
-  border-left: 3px solid rgba(0, 0, 0, 0.15);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent);
+  border-left: 3px solid var(--dsw-alias-border-l2);
   padding: 4px 8px;
   border-radius: 0 6px 6px 0;
   line-height: 1.5;
@@ -1521,8 +1532,8 @@
 
 .reviewPending {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.5);
-  background: rgba(0, 0, 0, 0.06);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   font-weight: 500;
@@ -1530,8 +1541,8 @@
 
 .reviewRejected {
   font-size: 10px;
-  color: #2e7d32;
-  background: rgba(46, 125, 50, 0.08);
+  color: var(--dsw-alias-state-error-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   font-weight: 600;
@@ -1541,24 +1552,24 @@
   font-size: 11px;
   padding: 4px 12px;
   border-radius: 6px;
-  border: 1px solid rgba(46, 125, 50, 0.45);
-  background: #ffffff;
-  color: #2e7d32;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-state-error-primary);
   cursor: pointer;
   margin-left: 8px;
 }
 
 .reviewReject:hover {
-  background: rgba(46, 125, 50, 0.08);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
 }
 
 .reviewRejectDone {
   font-size: 11px;
   padding: 4px 12px;
   border-radius: 6px;
-  border: 1px solid rgba(46, 125, 50, 0.3);
-  background: rgba(46, 125, 50, 0.08);
-  color: #2e7d32;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
+  color: var(--dsw-alias-state-error-primary);
   cursor: default;
   margin-left: 8px;
 }
@@ -1566,14 +1577,14 @@
 @media (prefers-reduced-motion: reduce) {
   .breathing {
     animation: none;
-    border-color: rgba(77, 107, 254, 0.6);
+    border-color: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 60%, transparent);
   }
 }
 
 .reviewPassBadge {
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.55);
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   font-weight: 600;
@@ -1582,9 +1593,9 @@
 
 .reviewEvidence {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.6);
-  background: rgba(25, 118, 210, 0.06);
-  border-left: 3px solid rgba(25, 118, 210, 0.35);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 6%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 35%, transparent);
   padding: 4px 8px;
   border-radius: 0 6px 6px 0;
   line-height: 1.5;
@@ -1598,9 +1609,9 @@
 
 .reviewRejectReason {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.6);
-  background: rgba(0, 0, 0, 0.03);
-  border-left: 3px solid rgba(0, 0, 0, 0.2);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, transparent);
+  border-left: 3px solid var(--dsw-alias-border-l1);
   padding: 4px 8px;
   border-radius: 0 6px 6px 0;
   line-height: 1.5;
@@ -1616,7 +1627,7 @@
 
 .reviewRejectLabel {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .reviewRejectInput {
@@ -1624,9 +1635,9 @@
   box-sizing: border-box;
   font-size: 12px;
   padding: 6px 8px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--dsw-alias-bg-layer-1);
   color: inherit;
   resize: vertical;
   min-height: 34px;
@@ -1647,14 +1658,14 @@
   margin-top: 6px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.04);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent);
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.65);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .reviewImpactWarn {
-  background: rgba(237, 108, 2, 0.1);
-  color: #b26a00;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent);
+  color: var(--dsw-alias-state-warn-primary);
   font-weight: 500;
 }
 
@@ -1665,10 +1676,10 @@
   z-index: 60;
   width: 300px;
   max-width: calc(100vw - 32px);
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.15);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--dsw-alias-label-primary) 18%, transparent);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -1678,7 +1689,7 @@
 .feedbackBarTitle {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.8);
+  color: var(--dsw-alias-label-primary);
   line-height: 1.5;
 }
 
@@ -1691,14 +1702,14 @@
   font-size: 12px;
   padding: 5px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(77, 107, 254, 0.4);
-  background: rgba(77, 107, 254, 0.06);
-  color: #4d6bfe;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 40%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 6%, transparent);
+  color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
   cursor: pointer;
 }
 
 .feedbackRating:hover {
-  background: rgba(77, 107, 254, 0.14);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary-new-colorprimary-new-color) 14%, transparent);
 }
 
 .feedbackBarNote {
@@ -1706,9 +1717,9 @@
   box-sizing: border-box;
   font-size: 12px;
   padding: 6px 8px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--dsw-alias-bg-layer-1);
   color: inherit;
   font-family: inherit;
 }
@@ -1724,10 +1735,10 @@
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
 
 .feedbackSkip:hover {
-  color: rgba(0, 0, 0, 0.8);
+  color: var(--dsw-alias-label-primary);
 }

@@ -25,7 +25,7 @@ import {
 } from './tool-views-model.ts'
 
 const CARD: CSSProperties = {
-  border: '1px solid rgba(128,128,128,0.35)',
+  border: '1px solid var(--dsw-alias-border-l1)',
   borderRadius: 8,
   padding: '8px 10px',
   font: '12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -34,7 +34,8 @@ const CARD: CSSProperties = {
 
 const HEAD: CSSProperties = { fontWeight: 600, marginBottom: 4 }
 const MUTED: CSSProperties = { opacity: 0.75 }
-const WARN: CSSProperties = { color: '#e0a030' }
+// 走主题令牌：写死的琥珀色在深色主题下会与底色对比不足（红队审查抓出的同类问题）。
+const WARN: CSSProperties = { color: 'var(--dsw-alias-state-warn-primary)' }
 
 /** Card body for a parsed status payload. */
 export function StatusCard({ data }: { data: StatusPayload }): JSX.Element {
