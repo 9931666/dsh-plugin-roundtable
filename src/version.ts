@@ -10,7 +10,7 @@
  */
 
 /** 当前插件版本（必须与 package.json 的 version 逐字一致）。 */
-export const PLUGIN_VERSION = '1.0.0-rc.2'
+export const PLUGIN_VERSION = '1.0.0-rc.3'
 
 /** 导出物头部使用的插件标识行。 */
 export const PLUGIN_ID = `@y9931666/dsh-plugin-roundtable v${PLUGIN_VERSION}`
