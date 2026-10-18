@@ -48,7 +48,9 @@ interface DragState {
   y: number
 }
 
-const NODE_RADIUS = 34
+/** 节点半径（px）：与 `.node` 的 84px 直径一致。连线端点、环形最小半径都靠它，
+ *  改节点尺寸时必须同步改这里，否则线会插进节点内部。 */
+const NODE_RADIUS = 42
 
 /** Provider → brand avatar (logo image if bundled, else abbreviation + brand color). */
 const PROVIDER_BRAND: Array<{ key: string; match: RegExp; abbr: string; color: string; dark?: boolean }> = [
@@ -1119,7 +1121,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           breathing ? styles.breathing : '',
         ].filter(Boolean).join(' ')}
         style={{ left: point.x, top: point.y }}
-        title={node === undefined ? label : `${label}${node.role !== '' ? ` · ${node.role}` : ''}`}
+        /* title 用**完整 key**：节点上显示的是去掉 `expert-` 前缀的短名，
+           悬停时必须还能看到原始 key（它才是可引用的标识）。 */
+        title={node === undefined ? label : `${node.key}${node.role !== '' ? ` · ${node.role}` : ''}`}
       >
         {brand !== null ? brandAvatar(brand, 'node') : null}
         <div className={styles.nodeLabel}>{label}</div>
@@ -1285,7 +1289,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </svg>
           {renderNode('captain', 'DeepSeek · 主持', 'captain')}
           {renderNode('aggregator', '汇聚网关', 'aggregator')}
-          {meeting.nodes.filter((node) => node.status !== 'removed').map((node) => renderNode(node.key, node.key, 'node'))}
+          {/* 节点只有 68px 宽：`expert-lifecycle` 在 62px 单行里必然截成
+              `expert-life…`。显示时去掉所有专家共有的 `expert-` 前缀（title
+              仍保留完整 key，悬停可见），节点名因此能真正读出来。 */}
+          {meeting.nodes.filter((node) => node.status !== 'removed').map((node) => renderNode(
+            node.key,
+            node.key.startsWith('expert-') ? node.key.slice('expert-'.length) : node.key,
+            'node',
+          ))}
           {edgeRemoveDots.map((dot) => (
             <button
               key={dot.id}

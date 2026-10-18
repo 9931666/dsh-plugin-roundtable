@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { RpcCaller, RoundTablePrefs, WireFeedbackEntry, WireProviderOption, WireRolePreset, WireRoleSquad } from './wire.ts'
+import { InlineIcon } from './icons.tsx'
 import styles from './RoundTableSettings.module.css'
 
 export interface RoundTableSettingsInjected {
@@ -456,7 +457,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         <div className={styles.hint}>{t('settingsShowAllHint')}</div>
       </div>
       <div className={styles.sectionDivider} />
-      <div className={styles.sectionTitle}>{t('settingsPanelsTitle')}</div>
+      <div className={styles.sectionTitle}><InlineIcon name="panel" />{t('settingsPanelsTitle')}</div>
       <div className={styles.field}>
         <div className={styles.panelToggles}>
           {PANEL_KEYS.map((panel) => {
@@ -496,7 +497,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         <div className={styles.hint}>{t('settingsLegendHint')}</div>
       </div>
       <div className={styles.sectionDivider} />
-      <div className={styles.sectionTitle}>{t('settingsSkillTitle')}</div>
+      <div className={styles.sectionTitle}><InlineIcon name="skill" />{t('settingsSkillTitle')}</div>
       <div className={styles.field}>
         <label className={styles.label}>{t('settingsSkillDelivery')}</label>
         <select
@@ -512,7 +513,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         </div>
       </div>
       <div className={styles.sectionDivider} />
-      <div className={styles.sectionTitle}>{t('settingsPresetsTitle')}</div>
+      <div className={styles.sectionTitle}><InlineIcon name="role" />{t('settingsPresetsTitle')}</div>
       <div className={styles.field}>
         <div className={styles.hint}>{t('settingsPresetsHint')}</div>
         {presets.length === 0 ? (
@@ -614,7 +615,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         ) : null}
       </div>
       <div className={styles.sectionDivider} />
-      <div className={styles.sectionTitle}>{t('settingsSquadTitle')}</div>
+      <div className={styles.sectionTitle}><InlineIcon name="squad" />{t('settingsSquadTitle')}</div>
       <div className={styles.field}>
         <div className={styles.hint}>{t('settingsSquadHint')}</div>
         {squads.length === 0 ? (
@@ -744,7 +745,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         ) : null}
       </div>
       <div className={styles.sectionDivider} />
-      <div className={styles.sectionTitle}>{t('settingsLimitsTitle')}</div>
+      <div className={styles.sectionTitle}><InlineIcon name="gauge" />{t('settingsLimitsTitle')}</div>
       <div className={styles.field}>
         <label className={styles.label}>{t('settingsExpertMaxTokens')}</label>
         <input
@@ -775,7 +776,7 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         <div className={styles.hint}>{t('settingsExpertMaxOpinionsHint')}</div>
       </div>
       <div className={styles.sectionDivider} />
-      <div className={styles.sectionTitle}>{t('feedbackTitle')}</div>
+      <div className={styles.sectionTitle}><InlineIcon name="message" />{t('feedbackTitle')}</div>
       <div className={styles.field}>
         <label className={styles.label}>{t('feedbackEnabled')}</label>
         <label className={styles.switchRow}>

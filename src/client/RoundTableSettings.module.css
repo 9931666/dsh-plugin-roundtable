@@ -1,9 +1,38 @@
+/* ---- 本地设计令牌（与针锋设置页同值，视觉重量刻意更低） ----
+ *
+ * 圆桌的设置页**不套卡片**：它的主界面是拓扑画布 + 右侧多面板，本来信息密度就高，
+ * 设置页再加一层带边框的卡片，两个插件并排时会有明显割裂感。这里只共享
+ * 字号 / 圆角 / 间距 / 控件规格，分组靠「细线 + 标题」表达。
+ */
 .root {
+  --rt-fs-11: 11px;
+  --rt-fs-12: 12px;
+  --rt-fs-13: 13px;
+  --rt-fs-14: 14px;
+  --rt-radius-s: 6px;
+  --rt-radius-m: 8px;
+  --rt-radius-l: 12px;
+  --rt-space-1: 4px;
+  --rt-space-2: 8px;
+  --rt-space-3: 12px;
+  --rt-space-4: 16px;
+  --rt-control-h: 32px;
+  --rt-border: var(--dsw-alias-border-l1);
+  --rt-border-strong: var(--dsw-alias-border-l2);
+  --rt-bg-soft: var(--dsw-alias-bg-layer-2);
+  --rt-fg: var(--dsw-alias-label-primary);
+  --rt-fg-2: var(--dsw-alias-label-secondary);
+  --rt-brand: var(--dsw-alias-brand-primary);
+  --rt-on-brand: var(--dsw-alias-bg-base);
+
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 560px;
+  gap: var(--rt-space-3);
+  max-width: 620px;
   padding: 8px 0;
+  color: var(--rt-fg);
+  font-size: var(--rt-fs-13);
+  line-height: 1.6;
 }
 
 .field {
@@ -13,26 +42,29 @@
 }
 
 .label {
-  font-size: 13px;
+  font-size: var(--rt-fs-13);
   font-weight: 600;
-  color: var(--dsw-alias-label-primary);
+  color: var(--rt-fg);
 }
 
 .select,
 .input {
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: var(--rt-control-h);
+  width: 100%;
+  max-width: 320px;
+  font-size: var(--rt-fs-13);
   padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
-  max-width: 260px;
+  border-radius: var(--rt-radius-m);
+  border: 1px solid var(--rt-border-strong);
+  background: var(--rt-bg-soft);
+  color: var(--rt-fg);
 }
 
 .hint {
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-  line-height: 1.6;
+  font-size: var(--rt-fs-12);
+  color: var(--rt-fg-2);
+  line-height: 1.7;
 }
 
 /* Minimal toggle switch. */
@@ -86,8 +118,8 @@
 }
 
 .switchLabel {
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
+  font-size: var(--rt-fs-12);
+  color: var(--rt-fg-2);
 }
 
 .warning {
@@ -107,14 +139,20 @@
 }
 
 .saveButton {
-  font-size: 13px;
-  padding: 7px 18px;
-  border-radius: 8px;
+  box-sizing: border-box;
+  min-height: var(--rt-control-h);
+  font-size: var(--rt-fs-13);
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: var(--rt-radius-m);
   border: none;
-  background: var(--dsw-alias-brand-primary);
-  /* 保留 #ffffff：品牌实底上的按钮文字，13 个令牌里没有 on-brand 前景色。 */
-  color: #ffffff;
+  background: var(--rt-brand);
+  color: var(--rt-on-brand);
   cursor: pointer;
+}
+
+.saveButton:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 
 .saveButton:disabled {
@@ -123,48 +161,75 @@
 }
 
 .saved {
-  font-size: 12px;
+  font-size: var(--rt-fs-12);
   color: var(--dsw-alias-state-success-primary);
 }
 
 .failed {
-  font-size: 12px;
+  font-size: var(--rt-fs-12);
   color: var(--dsw-alias-state-error-primary);
 }
 
 .note {
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
+  font-size: var(--rt-fs-12);
+  color: var(--rt-fg-2);
 }
 
+/* 分组：一条极淡的细线 + 一个紧贴其下的组标题。
+ *
+ * 之前是「1px 线 + 同样的 16px 空隙」，线和标题之间没有关系，读起来像随机分隔；
+ * 现在让线成为标题的"上边界"，标题到内容收紧到 8px，分组因此可辨。 */
 .sectionDivider {
   height: 1px;
-  background: var(--dsw-alias-border-l2);
-  margin: 2px 0;
+  background: var(--rt-border);
+  margin: var(--rt-space-3) 0 0;
 }
 
 .sectionTitle {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--dsw-alias-label-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--rt-fs-13);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--rt-fg);
+}
+
+/* 图标降一档：它是"目录"记号，不和文字抢。 */
+.sectionTitle svg {
+  flex: none;
+  color: var(--rt-fg-2);
+}
+
+/* 组标题与它下面的第一个控件贴紧，避免标题"漂"在两段空隙中间。 */
+.sectionTitle + .field,
+.sectionTitle + .panelToggles,
+.sectionTitle + .switchRow,
+.sectionTitle + .feedbackList,
+.sectionTitle + .presetList {
+  margin-top: calc(var(--rt-space-1) * -1);
 }
 
 /* ---------- R3：右栏面板显示（点圆圈决定显示/隐藏） ---------- */
 
+/* 面板开关排成等宽网格：七项用 flex+wrap 时最后一行只剩一个，看起来像漏排。
+ * 网格让每一行的起点对齐，行数随宽度自然变化。 */
 .panelToggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: var(--rt-space-2);
   max-width: 100%;
 }
 
 .panelToggleOn,
 .panelToggleOff {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  padding: 5px 10px 5px 8px;
+  min-height: 30px;
+  font-size: var(--rt-fs-12);
+  padding: 4px 10px 4px 8px;
   border-radius: 999px;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
@@ -223,11 +288,11 @@
 }
 
 .feedbackItem {
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
+  font-size: var(--rt-fs-12);
+  color: var(--rt-fg-2);
+  background: var(--rt-bg-soft);
+  border: 1px solid transparent;
+  border-radius: var(--rt-radius-m);
   padding: 8px 10px;
   line-height: 1.5;
 }
@@ -244,9 +309,11 @@
 }
 
 .feedbackClearBtn {
-  font-size: 12px;
-  padding: 4px 12px;
-  border-radius: 8px;
+  box-sizing: border-box;
+  min-height: 28px;
+  font-size: var(--rt-fs-12);
+  padding: 3px 12px;
+  border-radius: var(--rt-radius-s);
   border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent);
   background: transparent;
   color: var(--dsw-alias-state-error-primary);
@@ -272,11 +339,11 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
+  font-size: var(--rt-fs-12);
+  color: var(--rt-fg-2);
+  background: var(--rt-bg-soft);
+  border: 1px solid transparent;
+  border-radius: var(--rt-radius-m);
   padding: 8px 10px;
 }
 
@@ -289,21 +356,21 @@
 }
 
 .presetName {
-  font-size: 13px;
+  font-size: var(--rt-fs-13);
   font-weight: 600;
-  color: var(--dsw-alias-label-primary);
+  color: var(--rt-fg);
 }
 
 .presetMeta {
-  font-size: 11px;
-  color: var(--dsw-alias-label-secondary);
+  font-size: var(--rt-fs-11);
+  color: var(--rt-fg-2);
   line-height: 1.5;
   word-break: break-word;
 }
 
 .presetRoute {
-  font-size: 11px;
-  color: var(--dsw-alias-label-secondary);
+  font-size: var(--rt-fs-11);
+  color: var(--rt-fg-2);
 }
 
 .presetActions {
@@ -313,12 +380,14 @@
 }
 
 .presetBtn {
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
+  box-sizing: border-box;
+  min-height: 28px;
+  font-size: var(--rt-fs-12);
+  padding: 3px 10px;
+  border-radius: var(--rt-radius-s);
+  border: 1px solid var(--rt-border-strong);
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--rt-fg-2);
   cursor: pointer;
 }
 
@@ -338,11 +407,11 @@
 .presetForm {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px dashed var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-layer-2);
+  gap: var(--rt-space-2);
+  padding: 12px;
+  border-radius: var(--rt-radius-l);
+  border: 1px solid var(--rt-border);
+  background: var(--rt-bg-soft);
 }
 
 .presetFormRow {
@@ -357,14 +426,16 @@
 }
 
 .presetSelect {
+  box-sizing: border-box;
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  min-height: var(--rt-control-h);
+  font-size: var(--rt-fs-13);
   padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
+  border-radius: var(--rt-radius-m);
+  border: 1px solid var(--rt-border-strong);
+  background: var(--rt-bg-soft);
+  color: var(--rt-fg);
 }
 
 .presetFormActions {
@@ -374,24 +445,28 @@
 }
 
 .presetAddBtn {
-  font-size: 13px;
-  padding: 7px 18px;
-  border-radius: 8px;
+  box-sizing: border-box;
+  min-height: var(--rt-control-h);
+  font-size: var(--rt-fs-13);
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: var(--rt-radius-m);
   border: none;
-  background: var(--dsw-alias-brand-primary);
-  /* 保留 #ffffff：品牌实底上的按钮文字，13 个令牌里没有 on-brand 前景色。 */
-  color: #ffffff;
+  background: var(--rt-brand);
+  color: var(--rt-on-brand);
   cursor: pointer;
   align-self: flex-start;
 }
 
 .presetCancelBtn {
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
+  box-sizing: border-box;
+  min-height: 28px;
+  font-size: var(--rt-fs-12);
+  padding: 3px 12px;
+  border-radius: var(--rt-radius-s);
+  border: 1px solid var(--rt-border-strong);
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--rt-fg-2);
   cursor: pointer;
 }
 
@@ -406,11 +481,11 @@
 .squadMemberRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--rt-space-2);
   align-items: center;
 }
 
 .squadMemberRow .presetSelect {
-  flex: 1 1 120px;
+  flex: 1 1 140px;
   min-width: 0;
 }
