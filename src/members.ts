@@ -159,12 +159,6 @@ export async function spawnNode(
   if (provider.prepareContinuable === undefined) {
     throw new Error(`roundtable: provider "${config.provider}" does not support continuable nodes`)
   }
-  if (!provider.capabilities.persona) {
-    throw new Error(`roundtable: provider "${config.provider}" cannot apply a node persona`)
-  }
-  if (!provider.capabilities.toolFilter) {
-    throw new Error(`roundtable: provider "${config.provider}" cannot restrict captain-only tools for nodes`)
-  }
 
   const label = `${NODE_LABEL_PREFIX}${meeting.id}:${node.key}`
   // Per-request output cap: model max_tokens applied to every conversation
@@ -194,20 +188,61 @@ export async function spawnNode(
   // The `skill` tool is only reachable when the host actually registered it in
   // this agent's surface — never tell a node to call a loader it cannot see.
   const skillToolAvailable = ctx.tools.get('skill', captain) !== undefined
-  const started = await ctx.subagents.startContinuable({
-    provider: config.provider,
-    label,
-    request: {
-      prompt: [{ type: 'text', text: nodeWelcome(meeting, node) }] as ContentBlock[],
-      parent: captain,
-      persona: nodePersona(meeting, node, stateDir, limits, { ...skill, delivery, skillToolAvailable }),
-      toolFilter: nodeToolRestriction(delivery),
-      ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
-      ...(config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {}),
-    },
-    signal,
-  })
-  node.id = String(started.childId)
+
+  // persona 只生成一次：0.2.1+ 把它并入首条 prompt，旧宿主仍走独立通道。
+  const persona = nodePersona(meeting, node, stateDir, limits, { ...skill, delivery, skillToolAvailable })
+  const prompt: ContentBlock[] = [{ type: 'text', text: nodeWelcome(meeting, node) }]
+  const request: Record<string, unknown> = {
+    prompt,
+    parent: captain,
+    ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
+    ...(config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {}),
+  }
+
+  // 0.2.1 收敛了子代理契约：`startContinuable` 与 per-child `persona`/`toolFilter`
+  // 一起被移除（persona 归 system-prompt / agent preset，工具面由 preset 拥有）。
+  // 这里按运行时形状二选一，**不把探测变成加载门禁**：两个入口都缺才报错。
+  // 旧路径保留 persona/toolFilter 的硬限制；新路径把 persona 作为首条 prompt 的
+  // 第二段下发（同一份文本），工具边界退化为 persona 里的文字约束。
+  const subagents = ctx.subagents as unknown as {
+    startActivation?: (spec: {
+      provider: string
+      label: string
+      request: Record<string, unknown>
+      signal: AbortSignal
+      delivery: 'parent' | 'caller'
+    }) => Promise<{ childId: unknown }>
+    startContinuable?: (spec: {
+      provider: string
+      label: string
+      request: Record<string, unknown>
+      signal: AbortSignal
+    }) => Promise<{ childId: unknown }>
+  }
+
+  let childId: unknown
+  if (typeof subagents.startActivation === 'function') {
+    request.prompt = [...prompt, { type: 'text', text: persona }]
+    const started = await subagents.startActivation({
+      provider: config.provider,
+      label,
+      request,
+      signal,
+      delivery: 'parent',
+    })
+    childId = started.childId
+  } else if (typeof subagents.startContinuable === 'function') {
+    const started = await subagents.startContinuable({
+      provider: config.provider,
+      label,
+      request: { ...request, persona, toolFilter: nodeToolRestriction(delivery) },
+      signal,
+    })
+    childId = started.childId
+  } else {
+    throw new Error('roundtable: the host exposes neither startActivation (0.2.1+) nor startContinuable (older) — cannot spawn a node')
+  }
+  node.id = String(childId)
 }
 
 /**
