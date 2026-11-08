@@ -61,6 +61,17 @@ export interface MeetingNode {
    *  `spawnNode` into `agentOptions.reasoningEffort` and surfaced by
    *  `roundtable_status`; absent = inherit the captain's route-owned effort. */
   reasoningEffort?: string
+  /** 专家补充定位（可选，来自启动前确认卡 `experts[].prompt`；由
+   *  `roundtable_add_node` 的 `prompt` 参数写入）。
+   *
+   *  语义：它只**放宽这位专家的专长范围/关注点**（"只盯密钥轮换与权限边界"
+   *  这类）。硬边界：不能放宽《全局协作总纲》的红线（发言格式、严禁编造、
+   *  不替用户拍板），也不能改变只读/不产出方案等节点边界；与硬约束冲突的
+   *  部分一律视为无效。`nodePersona()` 会把这段文字以「专家补充定位」段注入
+   *  persona，并在同一段里写明上述声明。
+   *
+   *  缺省（或全空白）= 与旧行为逐字一致：persona 里不出现该段，不多空行。 */
+  expertPrompt?: string
   status: NodeStatus
   joinedAt: number
   /** 最近一次失败的可读说明（第 1 批）。子代理以 error 结束、或 provider 请求

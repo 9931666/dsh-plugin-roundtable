@@ -302,6 +302,22 @@ function normalizeSkillNames(value: unknown): string[] {
   return out
 }
 
+/** Sanitize the captain's change list (`changes[]`): 压平换行、去空、去重、封顶 20 条。
+ *
+ *  压平是必须的：变更点会写进卡片顶部的引用块，一条里带换行就把引用块拆断；
+ *  去空是诚实要求 —— 空白条目等于"本次未标注"，不该渲染成一个空 bullet。 */
+function normalizeChanges(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    const text = String(item ?? '').replace(/\s+/g, ' ').trim()
+    if (text === '' || out.includes(text)) continue
+    out.push(text)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
 /** 会议参数显式传入 > 设置页偏好 > Config 默认值。 */
 function plannedDefaults(config: ToolsConfig, args: Record<string, unknown>): PlannedDefaults {
   const injected = config.getPlannedDefaults?.() ?? {
@@ -328,18 +344,22 @@ function plannedDefaults(config: ToolsConfig, args: Record<string, unknown>): Pl
  *  渲染规则集中在 plan.ts，这里只做"加上当前可选 skill 清单"的转接。 */
 function renderPlanCard(
   draft: MeetingDraft,
-  experts: readonly { key: string; role?: string; provider?: string; model?: string }[],
   available: readonly SkillSummaryLike[],
-  options: { revised: boolean },
+  options: { revised: boolean; changes: readonly string[]; inheritedRoute?: { provider?: string; model?: string } },
 ): string {
-  return formatMeetingDraft(draft, experts, { revised: options.revised, availableSkills: available })
+  return formatMeetingDraft(draft, {
+    revised: options.revised,
+    changes: options.changes,
+    availableSkills: available,
+    ...(options.inheritedRoute === undefined ? {} : { inheritedRoute: options.inheritedRoute }),
+  })
 }
 
 /** Register every `roundtable_*` tool into the shared tools registry. */
 export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void {
   ctx.tools.register(defineTool({
     name: 'roundtable_create',
-    description: 'Create a new RoundTable meeting: you (the calling agent) become the captain (主持人). A captain leads one active meeting at a time. Preferred flow (v0.2.31): call roundtable_plan_meeting first, let the user confirm the draft card, then create the meeting with exactly the confirmed values (name/goal/mode/max_rounds/max_tokens/kb_path/skills/skill_delivery). Choose the collaboration mode: "orchestrated" means you decide who speaks and relay everything; "egalitarian" means experts message each other directly (a budget of max rounds/tokens then mutes the meeting — 闭麦).',
+    description: 'Create a new RoundTable meeting: you (the calling agent) become the captain (主持人). A captain leads one active meeting at a time. Preferred flow (v0.2.31): call roundtable_plan_meeting first, let the user confirm the draft card, then create the meeting with exactly the confirmed values (name/goal/mode/max_rounds/max_tokens/kb_path/skills/skill_delivery). Pass each confirmed expert\'s `prompt` (if any) to roundtable_add_node. Choose the collaboration mode: "orchestrated" means you decide who speaks and relay everything; "egalitarian" means experts message each other directly (a budget of max rounds/tokens then mutes the meeting — 闭麦).',
     parameters: {
       name: { type: 'string', required: true, description: 'Name for the new meeting (used as its stable id).' },
       goal: { type: 'string', required: true, description: 'Meeting background and core goal (charter section one) — the ultimate deliverable.' },
@@ -379,7 +399,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `RoundTable meeting "${value.meeting_name}" created (id ${value.meeting_id}, mode ${value.mode}, budget ${value.max_rounds} rounds / ${value.max_tokens} tokens, kb ${value.kb_path === '' ? 'none' : value.kb_path}, skills ${value.skills.length === 0 ? 'none' : value.skills.join(', ')} via ${value.skill_delivery}). You are the captain. Add expert nodes with roundtable_add_node.`,
+        text: `RoundTable meeting "${value.meeting_name}" created (id ${value.meeting_id}, mode ${value.mode}, budget ${value.max_rounds} rounds / ${value.max_tokens} tokens, kb ${value.kb_path === '' ? 'none' : value.kb_path}, skills ${value.skills.length === 0 ? 'none' : value.skills.join(', ')} via ${value.skill_delivery}). You are the captain. Add expert nodes with roundtable_add_node — pass each confirmed expert's \`prompt\` (if any) as its \`prompt\` parameter.`,
       }],
     },
     async execute(args, exec) {
@@ -458,7 +478,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'roundtable_plan_meeting',
-    description: 'Show the human a MEETING SETTINGS CARD before creating anything (R1). This tool does NOT create a meeting: it composes a readable draft (experts, mode, budget, knowledge base, selected skills) from the user\'s request plus your plugin defaults, then BLOCKS until the user confirms. Returns decision="approved" plus the confirmed plan to pass to roundtable_create, or decision="revise" with the user\'s own words — update the draft and call this tool again (the card is shown again, revised=true). Call it for EVERY meeting, even a single-expert one.',
+    description: 'Show the human a MEETING SETTINGS CARD before creating anything (R1). This tool does NOT create a meeting: it composes a readable draft (two Markdown tables: meeting settings + expert roster) from the user\'s request plus your plugin defaults, then BLOCKS until the user confirms. Returns decision="approved" plus the confirmed plan to pass to roundtable_create, or decision="revise" with the user\'s own words — update the draft and call this tool again (the card is shown again, revised=true). When re-confirming with revised=true, list every change you made in `changes` (an empty list is shown honestly as "未标注"). `experts[].prompt` only narrows that expert\'s focus; it must never relax the charter red lines. Call it for EVERY meeting, even a single-expert one.',
     parameters: {
       name: { type: 'string', required: true, description: '草案里的会议名称（也是会议 id 的来源）。' },
       goal: { type: 'string', required: true, description: '会议背景与核心目标（总纲第一节）。' },
@@ -474,8 +494,14 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
             role: { type: 'string', description: '角色说明，如 安全审查。' },
             provider: { type: 'string', description: '模型路由（与 model 同时给出才生效；缺省继承主持人当前路由）。' },
             model: { type: 'string', description: '模型名。' },
+            prompt: { type: 'string', description: '专家补充定位（可选）：只放宽专长范围，不能放宽总纲红线/拍板边界。' },
           },
         },
+      },
+      changes: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '本轮相对上一版草案的变更点（revised 卡片顶部逐条显示；没有就留空，不要编）。',
       },
       max_rounds: { type: 'integer', description: '轮数上限；缺省用设置页默认值。' },
       max_tokens: { type: 'integer', description: 'Token 预算；缺省用设置页默认值。' },
@@ -499,14 +525,29 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           kb_path: { type: 'string', required: true },
           skills: { type: 'array', required: true, items: { type: 'string' } },
           skill_delivery: { type: 'string', required: true },
+          experts: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                key: { type: 'string', required: true },
+                role: { type: 'string' },
+                provider: { type: 'string' },
+                model: { type: 'string' },
+                prompt: { type: 'string' },
+              },
+            },
+          },
         },
       },
       render: (_args, value) => [{
         type: 'text',
         text: value.decision === 'approved'
-          ? `用户已确认会议设置：创建 "${value.name}"（${value.mode}，${value.max_rounds} 轮 / ${value.max_tokens} tokens，kb ${value.kb_path === '' ? '未设置' : value.kb_path}，skills ${value.skills.length === 0 ? '未选' : value.skills.join(', ')}，skill 传递 ${value.skill_delivery}）。请用 roundtable_create 按这些值创建会议，然后逐个 roundtable_add_node。`
+          ? `用户已确认会议设置：创建 "${value.name}"（${value.mode}，${value.max_rounds} 轮 / ${value.max_tokens} tokens，kb ${value.kb_path === '' ? '未设置' : value.kb_path}，skills ${value.skills.length === 0 ? '未选' : value.skills.join(', ')}，skill 传递 ${value.skill_delivery}，专家 ${value.experts.length} 位）。请用 roundtable_create 按这些值创建会议，然后逐个 roundtable_add_node（每位专家的 prompt 原样传给 add_node 的 prompt）。`
           : value.decision === 'revise'
-            ? `用户要求修改：${value.user_note}\n请据此更新草案（保持未改动的项原样），再次调用 roundtable_plan_meeting 让用户确认；确认前不要创建会议。`
+            ? `用户要求修改：${value.user_note}\n请据此更新草案（保持未改动的项原样），并用 changes 逐条写明改动，再次调用 roundtable_plan_meeting 让用户确认；确认前不要创建会议。`
             : `设置卡片未能取得用户答复（userQuestions 服务不可用或被中止）${value.user_note === '' ? '' : `：${value.user_note}`}。请把草案内容用文字告知用户，取得明确同意后再调用 roundtable_create。`,
       }],
     },
@@ -518,9 +559,10 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const goal = String(args.goal ?? '').trim()
       const kbPath = typeof args.kb_path === 'string' ? args.kb_path.trim() : ''
       const skills = normalizeSkillNames(args.skills)
+      const changes = normalizeChanges(args.changes)
       const experts = Array.isArray(args.experts)
         ? (args.experts as unknown[]).flatMap((raw) => {
-            const entry = raw as { key?: unknown; role?: unknown; provider?: unknown; model?: unknown }
+            const entry = raw as { key?: unknown; role?: unknown; provider?: unknown; model?: unknown; prompt?: unknown }
             const key = String(entry?.key ?? '').trim()
             if (key === '') return []
             return [{
@@ -528,6 +570,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
               role: entry?.role === undefined ? undefined : String(entry.role),
               provider: entry?.provider === undefined ? undefined : String(entry.provider),
               model: entry?.model === undefined ? undefined : String(entry.model),
+              prompt: entry?.prompt === undefined ? undefined : String(entry.prompt),
             }]
           })
         : []
@@ -540,10 +583,25 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         kbPath,
         skills,
         skillDelivery: defaults.skillDelivery,
+        experts,
       }
+      // 确认后的专家名单原样回传：主持人据此逐个 add_node，不必再自己重排。
+      // 统一成字符串（空 = 未给），避免 undefined 在输出 JSON 里忽有忽无。
+      const expertOutput = experts.map((expert) => ({
+        key: expert.key,
+        role: expert.role ?? '',
+        provider: expert.provider ?? '',
+        model: expert.model ?? '',
+        prompt: expert.prompt ?? '',
+      }))
       // 清单读取失败一律降级为空（skills.ts 内部已兜底）。
       const available = await listInvocableSkills(ctx, workspace, exec.signal)
-      const detail = renderPlanCard(draft, experts, available, { revised: args.revised === true })
+      const detail = renderPlanCard(draft, available, {
+        revised: args.revised === true,
+        changes,
+        // 专家没写路由时卡片显示「继承主持人」；把主持人实际路由带上，用户才看得到继承的是什么。
+        inheritedRoute: { provider: captain.options.provider, model: captain.options.model },
+      })
 
       const userQuestions = ctx.get('userQuestions') as
         | {
@@ -572,6 +630,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         kb_path: draft.kbPath,
         skills: draft.skills,
         skill_delivery: draft.skillDelivery,
+        experts: expertOutput,
       }
       if (userQuestions === undefined) return fallback
 
@@ -610,19 +669,21 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         kb_path: draft.kbPath,
         skills: draft.skills,
         skill_delivery: draft.skillDelivery,
+        experts: expertOutput,
       }
     },
   }))
 
   ctx.tools.register(defineTool({
     name: 'roundtable_add_node',
-    description: 'Add an expert node to your meeting: spawns a durable continuable subagent with the meeting charter as its persona. By default the node inherits your current provider/model. Supply provider/model only when the user explicitly wants a different route for this expert.',
+    description: 'Add an expert node to your meeting: spawns a durable continuable subagent with the meeting charter as its persona. By default the node inherits your current provider/model. Supply provider/model only when the user explicitly wants a different route for this expert. Pass `prompt` (the confirmed settings card\'s experts[].prompt) to narrow this expert\'s focus; it never relaxes the charter red lines.',
     parameters: {
       name: { type: 'string', required: true, description: 'Unique node key inside the meeting (e.g. researcher, engineer, reviewer).' },
       role: { type: 'string', description: 'Role description for this expert (e.g. "security reviewer").' },
       provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model.' },
       model: { type: 'string', description: 'Optional model override. Omit to inherit your current model.' },
       reasoning_effort: { type: 'string', description: 'Optional adapter-owned reasoning-effort id for this expert (e.g. high / medium / low — the exact vocabulary is defined by the model capability, not by this plugin). Omit to inherit your own route-owned effort.' },
+      prompt: { type: 'string', description: '专家补充定位（可选，来自确认卡 experts[].prompt）：只放宽专长范围，不能放宽总纲红线/拍板边界。' },
     },
     output: {
       schema: {
@@ -637,9 +698,9 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           status: { type: 'string', required: true },
         },
       },
-      render: (_args, value) => [{
+      render: (args, value) => [{
         type: 'text',
-        text: `Node "${value.node_name}" joined (subagent id ${value.node_id}, ${value.provider}/${value.model}${value.reasoning_effort === '' ? '' : ` @ ${value.reasoning_effort}`}, status ${value.status}).`,
+        text: `Node "${value.node_name}" joined (subagent id ${value.node_id}, ${value.provider}/${value.model}${value.reasoning_effort === '' ? '' : ` @ ${value.reasoning_effort}`}, status ${value.status}${args.prompt !== undefined && String(args.prompt).trim() !== '' ? ', expert focus prompt set' : ''}).`,
       }],
     },
     async execute(args, exec) {
@@ -666,6 +727,10 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         // A2/A5: reasoning effort is captured on the node and forwarded by
         // spawnNode; an empty value means "inherit the captain's effort".
         const reasoningEffort = args.reasoning_effort !== undefined ? String(args.reasoning_effort).trim() : ''
+        // 专家补充定位（确认卡 experts[].prompt）：只放宽专长范围，不放宽总纲
+        // 红线 —— 该硬边界由 nodePersona() 的「专家补充定位」段声明。空白视为
+        // 未给，去掉它才能保证老会议/未填写的节点 persona 与本改动前逐字一致。
+        const expertPrompt = args.prompt !== undefined ? String(args.prompt).trim() : ''
         const node: MeetingNode = {
           id: '',
           key: nodeKey,
@@ -673,6 +738,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           provider: args.provider !== undefined ? String(args.provider) : captain.options.provider,
           model: args.model !== undefined ? String(args.model) : captain.options.model,
           reasoningEffort: reasoningEffort === '' ? undefined : reasoningEffort,
+          ...(expertPrompt === '' ? {} : { expertPrompt }),
           status: 'idle',
           joinedAt: Date.now(),
         }

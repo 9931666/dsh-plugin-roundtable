@@ -103,3 +103,39 @@ test('两个入口都不存在时给出可诊断的错误，而不是静默失�
     /neither startActivation .* nor startContinuable/,
   )
 })
+
+/** 拉一个节点，返回真正下发给宿主的 persona 文本（新宿主路径）。 */
+async function personaOf(nodePatch) {
+  const captured = {}
+  const ctx = fakeCtx({
+    getProvider: () => ({ prepareContinuable: () => {} }),
+    list: () => ['spawn'],
+    startActivation: async (spec) => {
+      captured.spec = spec
+      return { childId: 'child-x' }
+    },
+  })
+  const m = meeting()
+  Object.assign(m.nodes[0], nodePatch)
+  await spawnNode(ctx, CONFIG, m, m.nodes[0], CAPTAIN, '.roundtable', SIGNAL)
+  return captured.spec.request.prompt[1].text
+}
+
+test('expertPrompt 进入 persona：形成「专家补充定位」段并带不可覆盖声明', async () => {
+  const persona = await personaOf({ expertPrompt: '只盯密钥轮换与权限边界，不要泛泛谈架构' })
+  assert.ok(persona.includes('专家补充定位'), 'persona 缺少补充定位段')
+  assert.ok(persona.includes('只盯密钥轮换与权限边界，不要泛泛谈架构'), '补充定位正文没有进入 persona')
+  assert.ok(
+    persona.includes('只放宽专长，不放宽总纲红线/拍板边界，冲突以硬约束为准'),
+    '补充定位段必须声明硬边界（否则提示词就成了绕过红线的后门）',
+  )
+})
+
+test('expertPrompt 为空（缺省 / 空串 / 纯空白）时 persona 逐字不变，不多空行', async () => {
+  const baseline = await personaOf({})
+  const emptyString = await personaOf({ expertPrompt: '' })
+  const whitespace = await personaOf({ expertPrompt: '   \n  ' })
+  assert.equal(emptyString, baseline, '空串必须与缺省逐字一致')
+  assert.equal(whitespace, baseline, '纯空白必须与缺省逐字一致')
+  assert.ok(!baseline.includes('专家补充定位'), '没填提示词就不该出现该段')
+})

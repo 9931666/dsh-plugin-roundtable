@@ -1,6 +1,6 @@
 {
   "name": "@y9931666/dsh-plugin-roundtable",
-  "version": "1.0.0-rc.7",
+  "version": "1.0.0-rc.8",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
