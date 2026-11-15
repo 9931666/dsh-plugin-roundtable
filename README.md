@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
-  <img src="https://img.shields.io/badge/version-v1.0.0--rc.10-blue" alt="v1.0.0-rc.10">
+  <img src="https://img.shields.io/badge/version-v1.0.0--rc.11-blue" alt="v1.0.0-rc.11">
   <img src="https://img.shields.io/badge/host-0.2.2--rc.1-202724" alt="Harness 0.2.2-rc.1">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
@@ -129,7 +129,7 @@
 > [!NOTE]
 > 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.2.2-rc.1+**）。
 >
-> 版本坐标以 `package.json` 为准：插件 `1.0.0-rc.10`、宿主基线 `0.2.2-rc.1`。
+> 版本坐标以 `package.json` 为准：插件 `1.0.0-rc.11`、宿主基线 `0.2.2-rc.1`。
 > 上一个**破坏兼容**的宿主变更发生在 `0.2.0-rc.2`（`settings` 服务重构成 `SettingsForms`，
 > 插件不再能注册自己的配置命名空间 → 偏好改为自管；`MessageSourceMap` 移除 catch-all 的
 > `plugin` kind → 本插件自声明 `roundtable` kind）。`0.2.1` 又把子代理契约从
@@ -146,7 +146,7 @@ dsh plugin --profile web add @y9931666/dsh-plugin-roundtable@next
 > `y9931666`，而 `@huanlin` 这个 scope 属于**另一个用户**（他也在发 DSH 插件）。
 > 历史 release-notes 里 `@huanlin/dsh-plugin-roundtable` 的安装命令一律不可用。
 >
-> **这一版是预发布（`1.0.0-rc.10`），所以装的时候要带 `@next`。** npm 对带预发布后缀的
+> **这一版是预发布（`1.0.0-rc.11`），所以装的时候要带 `@next`。** npm 对带预发布后缀的
 > 版本不会更新 `latest` 标签，`dsh plugin add @y9931666/dsh-plugin-roundtable` 可能拿到旧版
 > 或报找不到；`@next` 就是本插件预发布版的固定入口。稳定版发布后才可以省掉 `@next`。
 
