@@ -5,7 +5,7 @@
  * @module dsh-plugin-roundtable/client/RoundTableSettings
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RpcCaller, RoundTablePrefs, WireFeedbackEntry, WireProviderOption, WireRolePreset, WireRoleSquad } from './wire.ts'
 import { InlineIcon } from './icons.tsx'
 import styles from './RoundTableSettings.module.css'
@@ -47,6 +47,14 @@ const SQUAD_MEMBER_LIMIT = 8
 export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element {
   const { rpc, t } = props
   const [prefs, setPrefs] = useState<RoundTablePrefs | null>(null)
+  /**
+   * `prefs` 的同步镜像。
+   *
+   * 三个写入口（保存 / 预设 / 阵容）都要"以最新值为基础"组装整份提交，但它们
+   * 都在 `async` 回调里工作 —— 闭包捕获的 `prefs` 往往是旧的。React 的
+   * `setState` 不会立刻更新闭包，所以这里维护一份 ref 作为唯一可信基准。
+   */
+  const prefsRef = useRef<RoundTablePrefs | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -96,18 +104,24 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       .catch(() => setFeedbackLoadFailed(true))
   }, [rpc])
 
+  /** 唯一的偏好写入口：同时更新 UI 状态与 ref 镜像，保证两者永不漂移。 */
+  const applyPrefs = useCallback((next: RoundTablePrefs | null): void => {
+    prefsRef.current = next
+    setPrefs(next)
+  }, [])
+
   const load = useCallback((): void => {
     void rpc<RoundTablePrefs>('roundtable/prefs.get', {})
       .then((result) => {
         if (result.ok) {
-          setPrefs(result.value)
+          applyPrefs(result.value)
           setLoadFailed(false)
         } else {
           setLoadFailed(true)
         }
       })
       .catch(() => setLoadFailed(true))
-  }, [rpc])
+  }, [rpc, applyPrefs])
 
   useEffect(() => {
     load()
@@ -115,18 +129,18 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
   }, [load, loadFeedback])
 
   const patch = (next: Partial<RoundTablePrefs>): void => {
-    setPrefs((previous) => previous === null ? null : { ...previous, ...next })
+    const previous = prefsRef.current
+    applyPrefs(previous === null ? null : { ...previous, ...next })
     setSaved(false)
   }
 
   /** R3：点亮/熄灭一个右栏面板（写入 hiddenPanels）。 */
   const togglePanel = (id: string): void => {
-    setPrefs((previous) => {
-      if (previous === null) return null
-      const hidden = Array.isArray(previous.hiddenPanels) ? previous.hiddenPanels : []
-      const nextHidden = hidden.includes(id) ? hidden.filter((entry) => entry !== id) : [...hidden, id]
-      return { ...previous, hiddenPanels: nextHidden }
-    })
+    const previous = prefsRef.current
+    if (previous === null) return
+    const hidden = Array.isArray(previous.hiddenPanels) ? previous.hiddenPanels : []
+    const nextHidden = hidden.includes(id) ? hidden.filter((entry) => entry !== id) : [...hidden, id]
+    applyPrefs({ ...previous, hiddenPanels: nextHidden })
     setSaved(false)
   }
 
@@ -134,24 +148,27 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
     if (prefs === null || saving) return
     setSaving(true)
     setSaveFailed(false)
-    void rpc<RoundTablePrefs>('roundtable/prefs.set', {
-      defaultMode: prefs.defaultMode,
-      maxRounds: prefs.maxRounds,
-      maxTokens: prefs.maxTokens,
-      showAllMeetings: prefs.showAllMeetings,
-      expertMaxTokens: prefs.expertMaxTokens,
-      expertMaxOpinions: prefs.expertMaxOpinions,
-      feedbackEnabled: prefs.feedbackEnabled,
-      skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
-      hiddenPanels: Array.isArray(prefs.hiddenPanels) ? prefs.hiddenPanels : [],
-      legendHidden: prefs.legendHidden === true,
-      sidebarEntryEnabled: prefs.sidebarEntryEnabled !== false,
-      conversationTabEnabled: prefs.conversationTabEnabled !== false,
-    })
-      .then((result) => {
+    // 走同一条串行队列：与预设/阵容的写入不会互相覆盖。
+    enqueuePrefsWrite(
+      // 保存按钮提交 UI 上此刻的全部字段。
+      (current) => ({
+        ...current,
+        defaultMode: prefs.defaultMode,
+        maxRounds: prefs.maxRounds,
+        maxTokens: prefs.maxTokens,
+        showAllMeetings: prefs.showAllMeetings,
+        expertMaxTokens: prefs.expertMaxTokens,
+        expertMaxOpinions: prefs.expertMaxOpinions,
+        feedbackEnabled: prefs.feedbackEnabled,
+        skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
+        hiddenPanels: Array.isArray(prefs.hiddenPanels) ? prefs.hiddenPanels : [],
+        legendHidden: prefs.legendHidden === true,
+        sidebarEntryEnabled: prefs.sidebarEntryEnabled !== false,
+        conversationTabEnabled: prefs.conversationTabEnabled !== false,
+      }),
+      (ok) => {
         setSaving(false)
-        if (result.ok) {
-          setPrefs(result.value)
+        if (ok) {
           setSaved(true)
           // 两个入口的注册/注销在 client/index.ts（插件 apply 时只读一次偏好），
           // 所以保存成功后广播一次：宿主侧的注册表不在 React 树里，改不了。
@@ -162,11 +179,8 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
         } else {
           setSaveFailed(true)
         }
-      })
-      .catch(() => {
-        setSaving(false)
-        setSaveFailed(true)
-      })
+      },
+    )
   }
 
   const clearFeedback = (): void => {
@@ -184,33 +198,73 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
 
   /* ---------------- B3：角色预设（改动立即落库，不必等底部保存） ---------------- */
 
-  /** 新建预设的稳定 id；host 侧只在 id 缺失或重复时才重新分配。 */
+  /**
+   * 写入整份偏好。
+   *
+   * 为什么仍然提交**完整对象**：服务端 `prefs.set` 是"只覆盖出现过的字段"的
+   * 合并语义，但客户端不该依赖这一点去拼半个对象（历史上有过"保存成功但刷新
+   * 后回退"）。完整对象在两种语义下都正确。
+   *
+   * 为什么还要排队（M5）：页面里有三个独立写入口（底部保存 / 预设 / 阵容），
+   * 它们各自把"当前 UI 快照"整份提交。若用户连续操作（删一个预设的同时点了
+   * 保存），两个请求会带着**同一份旧快照**先后落到服务端，后到的会把先到的
+   * 覆盖掉 —— 表现为"设置随机回滚"，且极难复现。
+   *
+   * 这里用一条串行链把它们排成队列：每个任务在**上一个任务完成后**才用当时的
+   * 最新 `prefs` 组装快照；并且把服务端返回的权威值写回状态，作为下一次的基准。
+   */
+  const writeChain = useRef<Promise<void>>(Promise.resolve())
+
+  /**
+   * 排队执行一次"整份偏好写入"。
+   *
+   * @param mutate - 在当前（已是最新）偏好的基础上算出要提交的完整对象
+   * @param onSettled - 成功 / 失败回调（各自负责自己的提示文案）
+   */
+  const enqueuePrefsWrite = (
+    mutate: (current: RoundTablePrefs) => RoundTablePrefs,
+    onSettled: (ok: boolean, value?: RoundTablePrefs) => void,
+  ): void => {
+    writeChain.current = writeChain.current.then(async () => {
+      // 用 ref 读最新值：闭包里的 `prefs` 可能是旧的。
+      const current = prefsRef.current
+      if (current === null) {
+        onSettled(false)
+        return
+      }
+      const payload = mutate(current)
+      setPrefs(payload)
+      try {
+        const result = await rpc<RoundTablePrefs>('roundtable/prefs.set', { ...payload })
+        if (result.ok) {
+          // 写回权威值，作为下一次写的基础（避免用过期的 UI 快照覆盖别人的结果）。
+          prefsRef.current = result.value
+          setPrefs(result.value)
+          onSettled(true, result.value)
+          return
+        }
+        onSettled(false)
+      } catch {
+        onSettled(false)
+      }
+    })
+  }
+
+  /**
+   * 新建预设的稳定 id；host 侧只在 id 缺失或重复时才重新分配。
+   */
   const newPresetId = (): string =>
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `preset-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
 
-  /**
-   * 写入整份偏好（含新的 rolePresets）。
-   *
-   * 刻意提交**完整对象**而不是只提交 `{ rolePresets }`：服务端
-   * `scope.update` 究竟是合并还是整体替换，客户端无法确定；提交完整对象
-   * 在两种语义下都正确，也与底部「保存」按钮的做法一致。
-   */
+  /** 写入整份偏好（含新的 rolePresets），经队列串行化。 */
   const persistPresets = (next: WireRolePreset[]): void => {
     if (prefs === null) return
-    const full: RoundTablePrefs = { ...prefs, rolePresets: next }
-    setPrefs(full)
-    void rpc<RoundTablePrefs>('roundtable/prefs.set', { ...full })
-      .then((result) => {
-        if (result.ok) {
-          setPrefs(result.value)
-          setPresetNotice('saved')
-        } else {
-          setPresetNotice('failed')
-        }
-      })
-      .catch(() => setPresetNotice('failed'))
+    enqueuePrefsWrite(
+      (current) => ({ ...current, rolePresets: next }),
+      (ok) => setPresetNotice(ok ? 'saved' : 'failed'),
+    )
   }
 
   const openPresetForm = (preset?: WireRolePreset): void => {

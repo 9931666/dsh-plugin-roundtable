@@ -42,7 +42,6 @@ import {
 } from './preferences.ts'
 import { setWorkspaceCandidates, workspaceCandidates } from './workspace-candidates.ts'
 import { join } from 'node:path'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 
 export const name = 'roundtable'
 
@@ -205,8 +204,15 @@ export function apply(ctx: Context, config: Config): void {
   // the transport that is reliably reachable — instead of depending on the
   // host's generic connection channel. Headless profiles may not mount the web
   // server: register lazily on service availability.
-  let webRegistered = false
-  let rpcRouteRegistered = false
+  // 注册标记 + 对应的 disposer。
+  //
+  // 早先只有两个布尔（`webRegistered` / `rpcRouteRegistered`），置真后**永不复位**。
+  // 而 `internal/service` 监听器在宿主服务重新挂载时会再调 `registerWebSurface`：
+  // 那时布尔已是 true，直接 return —— **新 webServer 上根本没有我们的路由**，
+  // 界面却一直转圈，且没有任何日志（M10）。所以这里把 disposer 也存下来：
+  // 服务被替换时先撤销旧注册，再往新服务上重新注册。
+  let webDisposer: (() => void) | undefined
+  let rpcDisposer: (() => void) | undefined
   const registerWebSurface = (): void => {
     // 服务解析统一走 harness-compat：候选键探测 + 探测结果留痕（诊断用），
     // 且**绝不成为加载门禁** —— 取不到就静默降级，插件其余部分照常工作。
@@ -218,19 +224,20 @@ export function apply(ctx: Context, config: Config): void {
     const fence = connectionFenceOf(ctx.get('connection'))
 
     // RPC route: needs only the web server, so it mounts on its own.
-    if (!rpcRouteRegistered) {
-      rpcRouteRegistered = true
-      ctx.effect(() => webServer.register({
-        kind: 'exact',
-        path: RPC_ROUTE,
-        handler: async (req, res) => {
-          const send = (status: number, body: unknown): void => {
-            res.writeHead(status, {
-              'content-type': 'application/json; charset=utf-8',
-              'cache-control': 'no-store',
-            })
-            res.end(JSON.stringify(body))
-          }
+    if (rpcDisposer === undefined) {
+      let dispose: unknown
+      ctx.effect(() => {
+        dispose = webServer.register({
+          kind: 'exact',
+          path: RPC_ROUTE,
+          handler: async (req, res) => {
+            const send = (status: number, body: unknown): void => {
+              res.writeHead(status, {
+                'content-type': 'application/json; charset=utf-8',
+                'cache-control': 'no-store',
+              })
+              res.end(JSON.stringify(body))
+            }
           const rejection = rejectWebRequest(fence, req.headers)
           if (rejection !== undefined) {
             send(rejection, { ok: false, error: { code: 'forbidden', message: 'connection trust check failed' } })
@@ -266,50 +273,68 @@ export function apply(ctx: Context, config: Config): void {
           // dispatch 自身绝不抛错（见 rpc.ts）。
           send(200, await dispatchRpc(message.endpoint, message.payload))
         },
-      }), 'roundtable: rpc route')
+        })
+        rpcDisposer = typeof dispose === 'function' ? dispose as () => void : () => {}
+        // `ctx.effect` 的返回值必须是一个合法的清理器；宿主没给 disposer 时
+        // 交一个空函数（无害），不要把 undefined 传出去。
+        return rpcDisposer
+      }, 'roundtable: rpc route')
     }
 
-    if (webRegistered) return
-    const workspaceRegistry = workspaceRegistryOf(ctx)
-    if (workspaceRegistry === undefined) return
-    webRegistered = true
-    const refreshCandidates = (): void => {
-      setWorkspaceCandidates(workspaceRegistry.list().map((workspace) => ({
-        title: workspace.title,
-        path: workspace.path,
-      })))
-    }
-    refreshCandidates()
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: '/plugins/dsh-plugin-roundtable/state',
-      handler: async (req, res) => {
-        // 第 2 批（P5）：这条 GET 会吐出所有会议的摘要、评审方案与发言。
-        const rejection = rejectWebRequest(fence, req.headers)
-        if (rejection !== undefined) {
-          res.writeHead(rejection, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ meetings: [] }))
-          return
-        }
-        const url = new URL(req.url ?? '/', 'http://x')
-        const roots = workspaceCandidates().map((workspace) => ({
-          workspace: workspace.title,
-          stateRoot: join(workspace.path, resolved.stateDir),
-        }))
-        const sessionFilter = url.searchParams.get('session') ?? undefined
-        const snapshots = await collectMeetingSnapshots(ctx, roots, sessionFilter)
-        res.writeHead(200, {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store',
+    // 快照路由：需要 workspace 注册表，缺它就先不挂（服务后到时由
+    // `internal/service` 监听器再调本函数）。
+    if (webDisposer === undefined) {
+      const workspaceRegistry = workspaceRegistryOf(ctx)
+      if (workspaceRegistry === undefined) return
+      const refreshCandidates = (): void => {
+        setWorkspaceCandidates(workspaceRegistry.list().map((workspace) => ({
+          title: workspace.title,
+          path: workspace.path,
+        })))
+      }
+      refreshCandidates()
+      let disposeWeb: unknown
+      ctx.effect(() => {
+        disposeWeb = webServer.register({
+          kind: 'exact',
+          path: '/plugins/dsh-plugin-roundtable/state',
+          handler: async (req, res) => {
+            // 第 2 批（P5）：这条 GET 会吐出所有会议的摘要、评审方案与发言。
+            const rejection = rejectWebRequest(fence, req.headers)
+            if (rejection !== undefined) {
+              res.writeHead(rejection, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+              res.end(JSON.stringify({ meetings: [] }))
+              return
+            }
+            const url = new URL(req.url ?? '/', 'http://x')
+            const roots = workspaceCandidates().map((workspace) => ({
+              workspace: workspace.title,
+              stateRoot: join(workspace.path, resolved.stateDir),
+            }))
+            const sessionFilter = url.searchParams.get('session') ?? undefined
+            const snapshots = await collectMeetingSnapshots(ctx, roots, sessionFilter)
+            res.writeHead(200, {
+              'content-type': 'application/json; charset=utf-8',
+              'cache-control': 'no-store',
+            })
+            res.end(JSON.stringify({ meetings: snapshots }))
+          },
         })
-        res.end(JSON.stringify({ meetings: snapshots }))
-      },
-    }), 'roundtable: snapshot route')
+        webDisposer = typeof disposeWeb === 'function' ? disposeWeb as () => void : () => {}
+        return webDisposer
+      }, 'roundtable: snapshot route')
+    }
   }
   registerWebSurface()
   ctx.on('internal/service', (serviceName) => {
     if (WEB_SERVER_KEYS.includes(serviceName as (typeof WEB_SERVER_KEYS)[number])
       || WORKSPACE_KEYS.includes(serviceName as (typeof WORKSPACE_KEYS)[number])) {
+      // 服务重新挂载时，旧路由挂在一个已经消失的 webServer 上：先撤销再重挂，
+      // 否则布尔锁会让"重注册"变成空操作，界面永久转圈（M10）。
+      webDisposer?.()
+      webDisposer = undefined
+      rpcDisposer?.()
+      rpcDisposer = undefined
       registerWebSurface()
     }
   })

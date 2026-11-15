@@ -1021,6 +1021,24 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* 失败原因（HTTP 状态 / 错误消息）与下一步指引：原因用等宽字体方便复制到
+   issue，指引用弱化色，避免错误条抢走整屏注意力。 */
+.fetchErrorDetail {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--dsw-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  opacity: 0.9;
+  word-break: break-word;
+}
+
+.fetchErrorHint {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--dsw-alias-text-secondary);
+}
+
 /* Connect-result toast: a short-lived banner at the top of the topology
    canvas telling the user whether a dragged wire landed. Without it a failed
    edge.add (e.g. wiring a removed node) was silently swallowed — the user saw

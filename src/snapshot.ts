@@ -7,7 +7,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { listMeetings, readMeeting, readReview, readTranscript, readUserActions } from './state.ts'
+import { listMeetings, readMeeting, readReview, readTranscriptCached, readUserActions } from './state.ts'
+import { reconcileNodeLiveness } from './node-events.ts'
 import { aggregateUtterances } from './aggregator.ts'
 import { ACTIVE_NODE_STATUSES, AGGREGATOR_KEY, CAPTAIN_KEY } from './types.ts'
 import type { Meeting, MeetingNode, MeetingUtterance, UserAction } from './types.ts'
@@ -94,11 +95,35 @@ export interface MeetingSnapshot {
     maxReviewPass: number
     question: string
     plan: string
+    /**
+     * 观点的线上形状。
+     *
+     * 这里必须与 `client/wire.ts` 的 `WireReviewViewpoint` **逐字段对齐**：
+     * 早先只声明了 5 个字段而实现写了 13 个，靠 `MeetingSnapshot['review']`
+     * 的可空联合把多出来的键吞掉了 —— `tsc` 不报错，类型却在骗人（H6）。
+     * 现在把实现真正输出的字段全列出来，少写一个或多写一个都会编译失败。
+     */
     viewpoints: {
       id: string
+      utteranceId: string
       nodeKey: string
       content: string
+      /** 三态：pending / endorsed / rejected。 */
+      status: string
+      /** 派生（旧视图仍读）：status === 'endorsed'。 */
       endorsed: boolean
+      /** 派生：status === 'rejected'。 */
+      rejected: boolean
+      /** 驳回理由（C2：驳回必填）。 */
+      rejectReason?: string
+      /** 证据分级（C1）。 */
+      evidence?: { kind: 'repro' | 'argument'; text: string }
+      /** 原文引用子串。 */
+      quote?: string
+      /** 维度标签。 */
+      dimension: string
+      /** 发言内序号（0 = 整条未拆分）。 */
+      seq: number
     }[]
   } | null
   digest: string
@@ -216,9 +241,14 @@ export async function collectMeetingSnapshots(
       const meeting = await readMeeting(root.stateRoot, meetingId)
       if (meeting === undefined) continue
       if (sessionFilter !== undefined && meeting.captainSessionId !== sessionFilter) continue
-      const utterances = await readTranscript(root.stateRoot, meetingId)
+      // 带 stat 缓存：文件没变就复用上次解析出的数组（M6 —— 这里 1s 一次、
+      // 每场会议全量解析，是轮询链路里最贵的一环）。
+      const utterances = await readTranscriptCached(root.stateRoot, meetingId)
       const userActions = await readUserActions(root.stateRoot, meetingId)
       const review = await readReview(root.stateRoot, meetingId)
+      // 本场会议的节点存活真值（含 missing）。一次目录查询覆盖全场节点，
+      // 不按节点各查一次。
+      const liveness = await reconcileNodeLiveness(ctx, meeting.captainSessionId, meeting.nodes)
       snapshots.push({
         id: meeting.id,
         name: meeting.name,
@@ -247,8 +277,14 @@ export async function collectMeetingSnapshots(
           if (node.status === 'removed') {
             activity = 'removed'
           } else if (node.id !== '' && ACTIVE_NODE_STATUSES.includes(node.status)) {
-            const live = ctx.agents.get(node.id as SessionId)
-            activity = live === undefined ? 'ready' : live.status
+            // 用 reconcileNodeLiveness 的真值（含 missing），而不是
+            // `live ? status : 'ready'`。
+            //
+            // 早先这里是内联的简化判定：宿主进程已经没了（目录里也查不到）的
+            // 子代理会被报成 `ready`，界面上显示"就绪"，主持人以为还能唤醒 ——
+            // 正是 node-events.ts 里"把消息投进死节点、静默丢一整轮"那个故障
+            // 在快照路径上的残留（M12）。`liveness` 每场会议只查一次宿主目录。
+            activity = liveness.get(node.key) ?? 'ready'
           }
           return {
             id: node.id,

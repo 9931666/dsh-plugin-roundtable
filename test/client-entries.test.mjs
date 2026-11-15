@@ -16,12 +16,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const pluginDir = resolve(here, '..')
+
+/**
+ * 产物是否存在（口径与 inject.test.mjs 一致）：`lib/` 被 .gitignore 排除，
+ * 干净 clone 上必然没有产物 —— 那时显式 skip 并说明原因，而不是静默失败。
+ */
+const BUNDLE_READY = existsSync(join(pluginDir, 'lib', 'index.js'))
+  && existsSync(join(pluginDir, 'lib', 'client.js'))
+const SKIP_REASON = 'lib/ 未构建（干净 clone 的常态）：先跑 `npm run build` 再复验入口注册'
 
 /**
  * 按 DSH 客户端模块系统的方式执行 lib/client.js。
@@ -124,7 +132,7 @@ function stubFetch(getPrefs) {
   return () => { globalThis.fetch = saved }
 }
 
-test('默认四个入口都在，且 main 先于 sidebar.panellist 注册', async () => {
+test('默认四个入口都在，且 main 先于 sidebar.panellist 注册', { skip: BUNDLE_READY ? false : SKIP_REASON }, async () => {
   const { exports } = loadClientBundle()
   const { registered, ctx } = fakeCtx()
   const restoreFetch = stubFetch(() => ({ sidebarEntryEnabled: true, conversationTabEnabled: true }))
@@ -155,7 +163,7 @@ test('默认四个入口都在，且 main 先于 sidebar.panellist 注册', asyn
   assert.equal(typeof face.t, 'function')
 })
 
-test('广播 prefs-changed：两个入口注销后能再注册回来（幂等）', async () => {
+test('广播 prefs-changed：两个入口注销后能再注册回来（幂等）', { skip: BUNDLE_READY ? false : SKIP_REASON }, async () => {
   const { exports, window } = loadClientBundle()
   const { registered, ctx } = fakeCtx()
   let prefs = { sidebarEntryEnabled: true, conversationTabEnabled: true }
@@ -184,7 +192,7 @@ test('广播 prefs-changed：两个入口注销后能再注册回来（幂等）
   }
 })
 
-test('两个开关互相独立：只关标签页时侧边栏入口仍在', async () => {
+test('两个开关互相独立：只关标签页时侧边栏入口仍在', { skip: BUNDLE_READY ? false : SKIP_REASON }, async () => {
   const { exports, window } = loadClientBundle()
   const { registered, ctx } = fakeCtx()
   let prefs = { sidebarEntryEnabled: true, conversationTabEnabled: true }

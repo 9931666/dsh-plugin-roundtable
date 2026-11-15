@@ -147,9 +147,23 @@ async function onNodeEnd(
 ): Promise<void> {
   const childId = String(info.id ?? '')
   if (childId === '') return
-  const location = locateNodeChild(childId)
-  if (location === undefined) return
-  const outcome = describeNodeEnd(info)
+  // `locateNodeChild` 与 `describeNodeEnd` 都在 try **里面**。
+  //
+  // 它们不是纯取值：`describeNodeEnd` 会对宿主传来的 `lastAssistantMessage` 做
+  // 结构断言（`block as { type, text }`），而事件载荷来自别的插件、形状不可控。
+  // 早先这两行在 try 外，一旦宿主传进非数组或含 null 元素就会抛出去；而调用点
+  // 是 `void onNodeEnd(...)` —— 那就是一个 **unhandled rejection**，Node 24 默认
+  // 会直接杀进程。观测失败绝不允许影响宿主，更不能崩宿主。
+  let location: ReturnType<typeof locateNodeChild>
+  let outcome: ReturnType<typeof describeNodeEnd>
+  try {
+    location = locateNodeChild(childId)
+    if (location === undefined) return
+    outcome = describeNodeEnd(info)
+  } catch (error: unknown) {
+    ctx.logger.warn(`roundtable: reading end event of node ${childId} failed: ${String(error)}`)
+    return
+  }
   try {
     if (outcome.text === '') {
       await writeNodeNote(location, childId, outcome.note)
@@ -204,7 +218,13 @@ function onRequestError(
  */
 export function attachNodeEvents(ctx: Context): void {
   ctx.on('subagent/end', (info) => {
+    // 必须挂 `.catch`：Node 24 的默认 `--unhandled-rejections=throw` 会让任何
+    // 逃出 `onNodeEnd` 的异常直接杀掉整个宿主进程。这里再兜一层，与函数内部的
+    // try 形成双保险（内部负责细分日志，这里负责"绝不留裸 rejection"）。
     void onNodeEnd(ctx, info as { id?: unknown; stopReason?: string; lastAssistantMessage?: readonly ContentBlock[] })
+      .catch((error: unknown) => {
+        ctx.logger.warn(`roundtable: subagent/end handler failed: ${String(error)}`)
+      })
   })
   ctx.on('agent/request-error', (payload, next) => {
     try {

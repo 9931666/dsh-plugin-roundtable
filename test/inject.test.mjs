@@ -23,19 +23,33 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const pluginDir = resolve(here, '..')
 
+/**
+ * 产物是否存在。
+ *
+ * 本文件断言的是 `lib/`（理由见文件头）。但 `lib/` 被 `.gitignore` 排除，
+ * 干净 clone 上**没有**产物 —— 那时这 3 个测试原本会 red，看上去像"代码坏了"，
+ * 实际只是没构建。所以这里显式 skip 并把原因写清楚，而不是让它们静默失败
+ * （`verify-package.mjs` 在非 --strict 下也会以同样口径记为"跳过"）。
+ *
+ * 想强制要求产物，用 `npm run build` 之后再跑，或跑 `publish:guard`（--strict）。
+ */
+const BUNDLE_READY = existsSync(join(pluginDir, 'lib', 'index.js'))
+  && existsSync(join(pluginDir, 'lib', 'client.js'))
+const SKIP_REASON = 'lib/ 未构建（干净 clone 的常态）：先跑 `npm run build` 再复验产物'
+
 /** 运行时可选读取的宿主能力：一旦列进 inject 就会拖死整个插件。 */
 const OPTIONAL_HOST_SERVICES = ['userQuestions', 'skills']
 /** 插件离开它们无法工作（注册工具 / 拉专家 / 写总纲）。 */
 const REQUIRED_HOST_SERVICES = ['tools', 'subagents', 'agents', 'systemPrompt']
 
-test('宿主产物 inject 只列必需服务，可选能力不得拖死整个插件', async () => {
+test('宿主产物 inject 只列必需服务，可选能力不得拖死整个插件', { skip: BUNDLE_READY ? false : SKIP_REASON }, async () => {
   const mod = await import(pathToFileURL(join(pluginDir, 'lib', 'index.js')).href)
   assert.ok(Array.isArray(mod.inject), 'lib/index.js 必须导出 inject 数组')
   for (const optional of OPTIONAL_HOST_SERVICES) {
@@ -104,7 +118,7 @@ function hostShapedCtx() {
   }
 }
 
-test('浏览器产物 inject 不含可选传输 connection，且必须注册两个界面入口', () => {
+test('浏览器产物 inject 不含可选传输 connection，且必须注册两个界面入口', { skip: BUNDLE_READY ? false : SKIP_REASON }, () => {
   const { id, exports } = loadClientBundle()
   assert.equal(id, '@y9931666/dsh-plugin-roundtable', 'bundle 注册的 id 必须与包名一致')
   assert.ok(!exports.inject.includes('connection'),
@@ -129,7 +143,7 @@ test('浏览器产物 inject 不含可选传输 connection，且必须注册两�
   }
 })
 
-test('两个界面入口都包在渲染错误边界里（崩溃要留下可读报错，而不是静默消失）', () => {
+test('两个界面入口都包在渲染错误边界里（崩溃要留下可读报错，而不是静默消失）', { skip: BUNDLE_READY ? false : SKIP_REASON }, () => {
   const { exports } = loadClientBundle()
   const { registered, ctx } = hostShapedCtx()
   exports.apply(ctx)

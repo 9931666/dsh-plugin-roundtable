@@ -81,7 +81,8 @@
     "verify:package": "node scripts/verify-package.mjs",
     "doctor": "node scripts/doctor.mjs",
     "release": "node scripts/release.mjs",
-    "publish:guard": "node scripts/compatibility.mjs && node scripts/verify-package.mjs --strict && node scripts/release.mjs"
+    "guard:lockfile": "node scripts/check-lockfile.mjs",
+    "publish:guard": "node scripts/check-lockfile.mjs && node scripts/compatibility.mjs && node scripts/verify-package.mjs --strict && node scripts/release.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",

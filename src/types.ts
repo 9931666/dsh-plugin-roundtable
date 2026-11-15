@@ -32,7 +32,7 @@ export type NodeStatus = 'idle' | 'working' | 'ready' | 'removed'
 export type EdgeDirection = 'forward' | 'bidirectional'
 
 /** What one transcript line records. */
-export type UtteranceKind = 'speech' | 'proxy-thinking' | 'retrieval' | 'decision' | 'auto-capture'
+export type UtteranceKind = 'speech' | 'proxy-thinking' | 'retrieval' | 'auto-capture'
 
 /** Node statuses that still count as participants. */
 export const ACTIVE_NODE_STATUSES: readonly NodeStatus[] = ['idle', 'working', 'ready']

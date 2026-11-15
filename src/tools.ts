@@ -113,6 +113,42 @@ function meetingLockKey(stateRoot: string, meetingId: string): string {
   return `meeting:${stateRoot}:${meetingId}`
 }
 
+/**
+ * 建会专用的双锁入口：**先 captain 锁，再 meeting 锁**。
+ *
+ * ## 为什么单独抽一个函数
+ *
+ * `withMeetingLock` 是**进程内单链、非重入**的锁（state.ts）：同一 key 上的
+ * 第二个请求排队，而任何"互相等待"都会让整个 host 挂死且无法自愈。全仓只有
+ * `roundtable_create` 一处需要同时持有两把锁（查"该主持人是否已有进行中的
+ * 会议" + 占用会议 id），这是唯一的嵌套点。
+ *
+ * 把方向钉在一个函数里，而不是散落在调用处：
+ *   - 将来新增嵌套时照抄这个方向就不会死锁；
+ *   - 如果有人想写「meeting → captain」，只有改这里才会被看见。
+ *
+ * 锁的持有范围刻意**只覆盖读-判-写**（查重 + 清目录 + 写会议）；LLM 外呼、
+ * 文件扫描之类绝不能进来 —— 见 `withMeetingLock` 的说明。
+ *
+ * @param captainOperation - 在 captain 锁内、meeting 锁外执行的判定回调
+ */
+async function withCaptainMeetingLock<T>(
+  stateRoot: string,
+  captainId: string,
+  meetingId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return withMeetingLock(captainLockKey(stateRoot, captainId), async () => {
+    // 主持人只能带一场进行中的会议。这一步在 captain 锁内做，因为它的判据
+    // 依赖同一位主持人的其它会议状态。
+    const current = await findMeetingByCaptain(stateRoot, captainId)
+    if (current !== undefined) {
+      throw new Error(`you already lead meeting "${current.name}" — close it before creating another`)
+    }
+    return withMeetingLock(meetingLockKey(stateRoot, meetingId), operation)
+  })
+}
+
 /** Find the active meeting this captain leads (or undefined). */
 async function findMeetingByCaptain(stateRoot: string, captainId: string): Promise<Meeting | undefined> {
   const { listMeetings } = await import('./state.ts')
@@ -289,6 +325,32 @@ function normalizeSkillDelivery(value: unknown, fallback: SkillDelivery): SkillD
   throw new Error(`skill_delivery must be "relay" | "direct", got "${String(value)}"`)
 }
 
+/**
+ * Normalize the utterance kind for `roundtable_speak` (throws on garbage).
+ *
+ * 为什么必须有这道校验：`defineTool` 的 `enum` **只用作模型提示，运行时并不
+ * 拦截**（schema 校验只查 type/required）。早先这里是一句
+ * `as 'speech'|'proxy-thinking'|'retrieval'` —— 类型断言把"没校验"这件事藏了
+ * 起来。传错值会原样写进 transcript.jsonl，然后被 `aggregateUtterances` 的
+ * kind 白名单**静默丢弃**：模型以为发言成功，实际这条论点永久消失，且没有任何
+ * 报错。现在非法值当场失败，并告诉调用方合法取值。
+ */
+function normalizeUtteranceKind(value: unknown): 'speech' | 'proxy-thinking' | 'retrieval' {
+  if (value === undefined || value === null) return 'speech'
+  if (value === 'speech' || value === 'proxy-thinking' || value === 'retrieval') return value
+  throw new Error(
+    `kind must be "speech" | "proxy-thinking" | "retrieval", got "${String(value)}" `
+    + '（其他取值会被汇聚网关丢弃，因此这里直接拒绝）',
+  )
+}
+
+/** Normalize an edge direction (throws on garbage). */
+function normalizeEdgeDirection(value: unknown): 'forward' | 'bidirectional' {
+  if (value === undefined || value === null) return 'forward'
+  if (value === 'forward' || value === 'bidirectional') return value
+  throw new Error(`direction must be "forward" | "bidirectional", got "${String(value)}"`)
+}
+
 /** Sanitize a skill-name list: trim, drop empties, de-duplicate, cap at 20. */
 function normalizeSkillNames(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -419,12 +481,15 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
       const kbPath = typeof args.kb_path === 'string' ? args.kb_path.trim() : ''
       const maxRounds = defaults.maxRounds
       const maxTokens = defaults.maxTokens
-      return withMeetingLock(captainLockKey(stateRoot, captain.id), async () => {
-        const current = await findMeetingByCaptain(stateRoot, captain.id)
-        if (current !== undefined) {
-          throw new Error(`you already lead meeting "${current.name}" — close it before creating another`)
-        }
-        return withMeetingLock(meetingLockKey(stateRoot, meetingId), async () => {
+      // 锁顺序（全仓唯一一处嵌套锁，见 withCaptainMeetingLock 的注释）：
+      //   captain 锁 → meeting 锁。
+      // 别处一律只取一把；将来若确实需要嵌套，必须沿用这个方向，否则进程内
+      // 单链锁互等 = 整个 host 挂死且无法自愈。
+      return withCaptainMeetingLock(
+        stateRoot,
+        captain.id,
+        meetingId,
+        async () => {
           const existing = await readMeeting(stateRoot, meetingId)
           if (existing !== undefined && existing.status !== 'ended' && existing.status !== 'archived') {
             throw new Error(`meeting id "${meetingId}" is taken — pick a different meeting name`)
@@ -471,8 +536,8 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
             skills: meeting.skills ?? [],
             skill_delivery: meeting.skillDelivery ?? skillDelivery,
           }
-        })
-      })
+        },
+      )
     },
   }))
 
@@ -852,7 +917,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         if (fresh.edges.some((edge) => edge.from === from && edge.to === to)) {
           throw new Error(`channel ${from} → ${to} already exists`)
         }
-        const direction = (args.direction ?? 'forward') as 'forward' | 'bidirectional'
+        const direction = normalizeEdgeDirection(args.direction)
         const edge: MeetingEdge = { id: randomUUID(), from, to, direction, createdAt: Date.now() }
         fresh.edges.push(edge)
         fresh.charter = buildCharter(fresh)
@@ -937,7 +1002,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         if (to !== undefined && to !== '' && !validEndpoint(meeting, to)) {
           throw new Error(`unknown directed audience "${to}"`)
         }
-        const kind = (args.kind ?? 'speech') as 'speech' | 'proxy-thinking' | 'retrieval'
+        const kind = normalizeUtteranceKind(args.kind)
         const utterance = await recordUtterance(
           stateRoot,
           meeting,
@@ -1299,8 +1364,11 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         let info
         try {
           info = await stat(resolved)
-        } catch {
-          throw new Error(`knowledge-base file not found or unreadable: ${resolved}`)
+        } catch (error: unknown) {
+          // 把系统错误码带上：EACCES（没权限）与 ENOENT（不存在）对用户是
+          // 完全不同的问题，统一说成"not found or unreadable"会让人无从下手。
+          const code = (error as NodeJS.ErrnoException).code
+          throw new Error(`knowledge-base file not found or unreadable: ${resolved}${code === undefined ? '' : ` (${code})`}`)
         }
         if (!info.isFile()) throw new Error(`not a file: ${resolved}`)
         const digestText = String(args.digest ?? '').trim()
@@ -1436,28 +1504,36 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         properties: {
           collected: { type: 'integer', required: true },
           split_attempts: { type: 'integer', required: true },
+          split_failures: { type: 'integer', required: true },
           status: { type: 'string', required: true },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Review collected: ${value.collected} viewpoint(s) (${value.split_attempts} split attempt(s)), status ${value.status}.`,
+        text: `Review collected: ${value.collected} viewpoint(s) (${value.split_attempts} split attempt(s)`
+          + `${value.split_failures > 0 ? `, ${value.split_failures} fell back to the local splitter` : ''}`
+          + `), status ${value.status}.`,
       }],
     },
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
       const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
       const located = await locateCaptainMeeting(stateRoot, captain.id)
-      return withCaptainLock(stateRoot, located.id, captain.id, 'collect review', async (fresh) => {
+
+      // ── 第一段（持锁，短）──
+      // 只做「读 transcript + 算出待收集集合 + 置 reviewing」，**不调 LLM**。
+      //
+      // 早先整段（含 N 次 LLM 调用）都在 `withCaptainLock` 里：拆分器单次超时
+      // 60s，20 条待拆就是最坏 20 分钟持续持锁，期间 speak / status /
+      // send_message / 所有 RPC 全部排队 —— 用户看到的是"界面卡住、状态不刷新"。
+      // LLM 是外呼，绝不能占着会议锁。
+      const pending = await withCaptainLock(stateRoot, located.id, captain.id, 'collect review', async (fresh) => {
         const review = await readReview(stateRoot, fresh.id)
         if (review === undefined) throw new Error('no review in progress — call roundtable_start_review first')
         // 幂等键 = utteranceId 集合（观点拆分后 viewpoint.id 已变，不能用作去重）。
         const collectedUtteranceIds = new Set(review.viewpoints.map((viewpoint) => viewpoint.utteranceId))
         const utterances = await readTranscript(stateRoot, fresh.id)
-        const llm = ctx.get('llm') as SplitLlmLike | undefined
-        const splitConfig = config.reviewSplit
-        let collected = 0
-        let splitAttempts = 0
+        const queue: { id: string; nodeKey: string; content: string; ts: number }[] = []
         for (const utterance of utterances) {
           if (utterance.nodeKey === CAPTAIN_KEY) continue
           if (utterance.kind !== 'speech' && utterance.kind !== 'proxy-thinking') continue
@@ -1465,49 +1541,87 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
           if (collectedUtteranceIds.has(utterance.id)) continue
           const content = utterance.content.replace(/\s+/g, ' ').trim()
           if (content === '') continue // 空发言跳过
-          // 观点拆分（三道防线）：LLM 优先，任何失败 → 本地启发式兜底（零 token）→ 仍失败则整条兜底（seq=0）。
-          let lines: Awaited<ReturnType<typeof splitUtterance>> | null = null
-          if (llm !== undefined && splitConfig !== undefined) {
-            try {
-              lines = await splitUtterance(llm, splitConfig, utterance.nodeKey, content)
-              splitAttempts += 1
-            } catch {
-              lines = null
-            }
+          queue.push({ id: utterance.id, nodeKey: utterance.nodeKey, content, ts: utterance.ts })
+        }
+        return queue
+      })
+
+      // ── 第二段（不持锁）──
+      // 观点拆分（三道防线）：LLM 优先，任何失败 → 本地启发式兜底（零 token）→
+      // 仍失败则整条兜底（seq=0）。这段可能在锁外跑很久，所以结果先攒在内存。
+      const llm = ctx.get('llm') as SplitLlmLike | undefined
+      const splitConfig = config.reviewSplit
+      const splitOutcomes: {
+        id: string
+        nodeKey: string
+        content: string
+        ts: number
+        lines: Awaited<ReturnType<typeof splitUtterance>> | null
+      }[] = []
+      let splitAttempts = 0
+      let splitFailures = 0
+      for (const item of pending) {
+        let lines: Awaited<ReturnType<typeof splitUtterance>> | null = null
+        if (llm !== undefined && splitConfig !== undefined) {
+          try {
+            lines = await splitUtterance(llm, splitConfig, item.nodeKey, item.content)
+            splitAttempts += 1
+          } catch (error: unknown) {
+            // 失败必须计数：早先两层 `catch {}` 全静默，输出里的「0 次尝试」
+            // 既可能是"没配 LLM"也可能是"每次都失败"，主持人无从判断（H3）。
+            lines = null
+            splitFailures += 1
+            ctx.logger.warn(`roundtable: splitting utterance ${item.id} via LLM failed: ${String(error)}`)
           }
-          if (lines === null) {
-            // 无 LLM 或 LLM 拆分失败：按「观点 N（…）」段落结构本地切分，保证观点逐条可认定。
-            try {
-              lines = splitByMarkers(content)
-            } catch {
-              lines = null
-            }
+        }
+        if (lines === null) {
+          // 无 LLM 或 LLM 拆分失败：按「观点 N（…）」段落结构本地切分。
+          try {
+            lines = splitByMarkers(item.content)
+          } catch (error: unknown) {
+            lines = null
+            ctx.logger.warn(`roundtable: local marker split of utterance ${item.id} failed: ${String(error)}`)
           }
+        }
+        splitOutcomes.push({ ...item, lines })
+      }
+
+      // ── 第三段（持锁，短）──合并结果。
+      return withCaptainLock(stateRoot, located.id, captain.id, 'collect review', async (fresh) => {
+        const review = await readReview(stateRoot, fresh.id)
+        if (review === undefined) throw new Error('no review in progress — call roundtable_start_review first')
+        // 锁外这段时间里可能已经有别的 collect 跑过：按 utteranceId 再滤一次，
+        // 保证幂等（同一发言不会因为两段之间的时间窗口被重复收进来）。
+        const already = new Set(review.viewpoints.map((viewpoint) => viewpoint.utteranceId))
+        let collected = 0
+        for (const outcome of splitOutcomes) {
+          if (already.has(outcome.id)) continue
+          const { lines } = outcome
           if (lines !== null && lines.length > 0) {
             lines.forEach((line, index) => {
               review.viewpoints.push({
-                id: `${utterance.id}#${index + 1}`,
-                utteranceId: utterance.id,
-                nodeKey: utterance.nodeKey,
+                id: `${outcome.id}#${index + 1}`,
+                utteranceId: outcome.id,
+                nodeKey: outcome.nodeKey,
                 content: line.content,
                 status: 'pending',
                 quote: line.quote,
                 dimension: line.dimension,
                 evidence: line.evidence,
-                ts: utterance.ts,
+                ts: outcome.ts,
                 seq: index + 1,
               })
               collected += 1
             })
           } else {
             review.viewpoints.push({
-              id: `${utterance.id}#0`,
-              utteranceId: utterance.id,
-              nodeKey: utterance.nodeKey,
-              content,
+              id: `${outcome.id}#0`,
+              utteranceId: outcome.id,
+              nodeKey: outcome.nodeKey,
+              content: outcome.content,
               status: 'pending',
               dimension: '其他',
-              ts: utterance.ts,
+              ts: outcome.ts,
               seq: 0,
             })
             collected += 1
@@ -1515,7 +1629,7 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
         }
         if (collected > 0) review.status = 'ready'
         await writeReview(stateRoot, fresh.id, review)
-        return { collected, split_attempts: splitAttempts, status: review.status }
+        return { collected, split_attempts: splitAttempts, split_failures: splitFailures, status: review.status }
       })
     },
   }))
@@ -1676,11 +1790,23 @@ export function registerRoundTableTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
+      // 数值校验（L7）：这里此前只判 `typeof === 'number'`，于是 0、负数与
+      // NaN 全部照收。`NaN` 一旦落盘，`budgetExceeded` 的两个比较恒为 false
+      // —— **预算永不熔断**，而界面上显示的是 "NaN / 200000"，看不出问题。
+      // 口径与 create / 设置页保持一致：轮数 ≥ 1，token ≥ 1000。
+      const nextRounds = args.max_rounds === undefined ? undefined : Math.floor(Number(args.max_rounds))
+      const nextTokens = args.max_tokens === undefined ? undefined : Math.floor(Number(args.max_tokens))
+      if (nextRounds !== undefined && (!Number.isFinite(nextRounds) || nextRounds < 1)) {
+        throw new Error(`max_rounds must be an integer >= 1, got ${String(args.max_rounds)}`)
+      }
+      if (nextTokens !== undefined && (!Number.isFinite(nextTokens) || nextTokens < 1000)) {
+        throw new Error(`max_tokens must be an integer >= 1000, got ${String(args.max_tokens)}`)
+      }
       const stateRoot = stateRootOf(workspaceOf(captain), config.stateDir)
       const located = await locateCaptainMeeting(stateRoot, captain.id)
       return withCaptainLock(stateRoot, located.id, captain.id, 'change the budget', async (fresh) => {
-        if (typeof args.max_rounds === 'number') fresh.budget.maxRounds = Math.floor(args.max_rounds)
-        if (typeof args.max_tokens === 'number') fresh.budget.maxTokens = Math.floor(args.max_tokens)
+        if (nextRounds !== undefined) fresh.budget.maxRounds = nextRounds
+        if (nextTokens !== undefined) fresh.budget.maxTokens = nextTokens
         // Escalation path: once the budget no longer exceeds its caps, the mute
         // is lifted. This tool is reachable while muted (see allowMuted below) —
         // it is the escape hatch, not another victim of the gate.
@@ -1912,10 +2038,44 @@ function renderReviewMarkdown(review: ReviewRecord, meeting: Meeting): string {
     .map((node) => `${node.key}（${node.provider ?? '-'}/${node.model ?? '-'}）`)
   out.push(`- **专家**：${expertRoutes.length === 0 ? '-' : expertRoutes.join('、')}`)
   out.push(`- **预算用量**：${meeting.budget.usedRounds}/${meeting.budget.maxRounds} 轮 · ${meeting.budget.usedTokens}/${meeting.budget.maxTokens} token`)
-  out.push(`- **真实用量（provider 上报）**：${meeting.budget.usedTokensReal ?? 0} token —— 上面的 token 数是"发言文本粗估"，不是真实账单`)
+  out.push(`- **真实用量**：${realUsageLine(meeting)}`)
   out.push('---', '')
   out.push(renderReviewBody(review))
   return out.join('\n')
+}
+
+/**
+ * 导出物里的「真实用量」一行。
+ *
+ * ## 为什么是三态而不是一个数字
+ *
+ * 这个数字来自 provider 上报的会话用量，但**只覆盖"还活着、并且被测到"的专家
+ * 子会话**：主持人自己的会话不算，已经结束的专家会话也测不到。早先这里写的是
+ * `${usedTokensReal ?? 0}` —— 那等于把"没测到"渲染成"0 token"，并且与同一份
+ * 导出里"发言文本粗估"的数字并排出现，读者会错误地把它当作账单口径，进而质疑
+ * "为什么预算没熔断"（两个数差一个数量级时最明显）。
+ *
+ * 所以：
+ *   - 一个都没测到 → 直说不可测，不给 0；
+ *   - 部分测到     → 给出数字并写明"只是其中一部分"；
+ *   - 全部测到     → 给数字 + 说明它仍不含主持人。
+ */
+function realUsageLine(meeting: Meeting): string {
+  const real = meeting.budget.usedTokensReal
+  // 只统计"在用且可测"的专家会话；`usedTokensReal` 是它们的合计。
+  const liveExperts = meeting.nodes.filter((node) => node.status !== 'removed' && node.id !== '')
+  const measured = liveExperts.length
+  if (real === undefined || real <= 0) {
+    return `不可测（此刻没有可读取的 provider 用量；上面的 token 数是发言文本粗估，不是账单）`
+  }
+  if (measured === 0) {
+    return `${real} token（provider 上报；当前没有在用专家会话，不含主持人自身消耗）`
+  }
+  // 覆盖率（L5）：只说"N 位在用专家"会让读者误以为这是全场总数。明确写出
+  // 分母（全场专家数）与"冷会话测不到"这件事。
+  const total = meeting.nodes.filter((node) => node.status !== 'removed').length
+  return `${real} token（provider 上报；覆盖 ${measured}/${total} 位专家的 live 会话，`
+    + `已结束的专家会话无法回读，**不含主持人自身消耗**；上面的 token 数是发言文本粗估）`
 }
 
 /** 评审主体（不含 issue 头部）：整场会议导出复用它，避免头部重复。 */
@@ -1984,7 +2144,9 @@ export function renderMeetingMarkdown(
   review: ReviewRecord | undefined,
 ): string {
   const out: string[] = []
-  const running = meeting.status !== 'ended'
+  // 「进行中快照」只对 active / muted 成立：`archived` 是保留态，不是"还在跑"，
+  // 早先 `status !== 'ended'` 会把它也标成进行中，导出物头部因此说错状态（L4）。
+  const running = meeting.status === 'active' || meeting.status === 'muted'
   out.push(`# 圆桌会议记录 · ${meeting.name}`, '')
   out.push('---')
   out.push('<!-- 以下为预填的会议元数据，可整段作为 issue / 归档记录的头部 -->')
@@ -1995,7 +2157,7 @@ export function renderMeetingMarkdown(
   out.push(`- **创建时间**：${formatStamp(meeting.createdAt)}`)
   out.push(`- **${running ? '最后更新' : '结束时间'}**：${formatStamp(meeting.updatedAt)}`)
   out.push(`- **预算用量**：${meeting.budget.usedRounds}/${meeting.budget.maxRounds} 轮 · ${meeting.budget.usedTokens}/${meeting.budget.maxTokens} token`)
-  out.push(`- **真实用量（provider 上报）**：${meeting.budget.usedTokensReal ?? 0} token —— 上面的 token 数是"发言文本粗估"，不是真实账单`)
+  out.push(`- **真实用量**：${realUsageLine(meeting)}`)
   if ((meeting.kbPath ?? '') !== '') out.push(`- **知识库**：${meeting.kbPath}`)
   if ((meeting.skills ?? []).length > 0) {
     out.push(`- **skill**：${(meeting.skills ?? []).map((skill) => `\`${skill}\``).join('、')}（传递方式 ${meeting.skillDelivery ?? 'relay'}）`)

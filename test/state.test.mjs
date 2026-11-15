@@ -14,9 +14,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   appendUtterance,
+  forgetTranscriptCache,
   readMeeting,
   readReview,
   readTranscript,
+  readTranscriptCached,
   resetMeetingDirectory,
   stateRootOf,
   writeMeeting,
@@ -130,6 +132,71 @@ test('P3：对不存在的会议目录是幂等的（不抛错）', async () => 
   try {
     await resetMeetingDirectory(stateRoot, 'never-existed')
     await resetMeetingDirectory(stateRoot, 'never-existed')
+  } finally {
+    await cleanup()
+  }
+})
+
+/* ------------------------------------------------------------------ *
+ * transcript 读取缓存（M6）
+ *
+ * 这几条守的是"缓存不能在内容变了之后还吐旧值"——缓存写错的典型症状就是
+ * 快照比磁盘慢一拍，而那种 bug 只在真实使用里才看得到。
+ * ------------------------------------------------------------------ */
+
+function utterance(id, content) {
+  return { id, nodeKey: 'expert-a', kind: 'speech', content, round: 1, ts: Number(id.replace(/\D/g, '')) || 1 }
+}
+
+test('readTranscriptCached：同一文件第二次读取命中缓存（内容相同）', async () => {
+  const { stateRoot, cleanup } = await tempStateRoot()
+  try {
+    await appendUtterance(stateRoot, 'm1', utterance('u1', '第一条'))
+    const first = await readTranscriptCached(stateRoot, 'm1')
+    const second = await readTranscriptCached(stateRoot, 'm1')
+    assert.equal(first.length, 1)
+    assert.deepEqual(second, first)
+    // 命中时返回的是同一份数组实例（证明没有重新解析）。
+    assert.equal(second, first, '未变更时应复用同一个解析结果')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('readTranscriptCached：追加新发言后缓存必须失效（size/mtime 变化）', async () => {
+  const { stateRoot, cleanup } = await tempStateRoot()
+  try {
+    await appendUtterance(stateRoot, 'm2', utterance('u1', '第一条'))
+    assert.equal((await readTranscriptCached(stateRoot, 'm2')).length, 1)
+    await appendUtterance(stateRoot, 'm2', utterance('u2', '第二条'))
+    const after = await readTranscriptCached(stateRoot, 'm2')
+    assert.equal(after.length, 2, '追加后必须看到新发言，不能返回缓存里的旧数组')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('readTranscriptCached：目录被清空后返回空，且不会回放旧内容', async () => {
+  const { stateRoot, cleanup } = await tempStateRoot()
+  try {
+    await appendUtterance(stateRoot, 'm3', utterance('u1', '第一条'))
+    assert.equal((await readTranscriptCached(stateRoot, 'm3')).length, 1)
+    await resetMeetingDirectory(stateRoot, 'm3')
+    assert.deepEqual(await readTranscriptCached(stateRoot, 'm3'), [], '会议被清空后不得再返回缓存内容')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('forgetTranscriptCache：显式失效后重新从磁盘读', async () => {
+  const { stateRoot, cleanup } = await tempStateRoot()
+  try {
+    await appendUtterance(stateRoot, 'm4', utterance('u1', '第一条'))
+    const first = await readTranscriptCached(stateRoot, 'm4')
+    forgetTranscriptCache(stateRoot, 'm4')
+    const again = await readTranscriptCached(stateRoot, 'm4')
+    assert.deepEqual(again, first, '内容应相同')
+    assert.notEqual(again, first, '显式失效后必须重新解析')
   } finally {
     await cleanup()
   }

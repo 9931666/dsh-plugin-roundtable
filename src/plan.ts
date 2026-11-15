@@ -14,6 +14,7 @@
  */
 
 import type { SkillDelivery } from './types.ts'
+import { formatSkillLine, type SkillSummaryLike } from './skills.ts'
 
 /** skill 的两种传递方式（D5）。单一来源：types.ts。 */
 export type { SkillDelivery }
@@ -259,15 +260,19 @@ export function formatMeetingDraft(
   ].join('\n')
 }
 
-/** 渲染"当前可选 skill"清单（空清单给出可操作提示）。 */
+/**
+ * 渲染"当前可选 skill"清单（空清单给出可操作提示）。
+ *
+ * 逐行格式复用 `skills.ts::formatSkillLine` —— 早先这里是同一套「`name` — 描述」
+ * 的**第二份**实现，两处一旦改动就会不一致（同一份数据在卡片与工具输出里长得
+ * 不一样）。现在只有一个格式化入口。
+ */
 function formatAvailableSkills(available: readonly SkillListEntry[]): string {
   if (available.length === 0) {
     return '（本机当前没有可选 skill：把 skill 放进 `<工作区>/.dsh/skills/`、`<工作区>/.agents/skills/` 或 `<DSH_HOME>/skills/` 即会出现）'
   }
-  const lines = available.slice(0, SKILL_LIST_LIMIT).map((skill) => {
-    const description = skill.description === undefined || skill.description.trim() === '' ? '' : ` — ${skill.description.trim()}`
-    return `  - \`${skill.name}\`${description}`
-  })
+  const lines = available.slice(0, SKILL_LIST_LIMIT).map((skill) =>
+    `  ${formatSkillLine({ name: skill.name, description: skill.description ?? '', source: undefined } as SkillSummaryLike)}`)
   if (available.length > SKILL_LIST_LIMIT) {
     lines.push(`  - …另有 ${available.length - SKILL_LIST_LIMIT} 个`)
   }

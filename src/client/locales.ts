@@ -86,6 +86,7 @@ export type RoundTableKey =
   | 'settingsLoadFailed'
   | 'settingsSaveFailed'
   | 'fetchFailed'
+  | 'fetchFailedHint'
   | 'renderFailed'
   | 'renderFailedHint'
   | 'meetingSelect'
@@ -327,6 +328,7 @@ export const zh: Record<RoundTableKey, string> = {
   settingsLoadFailed: '读取设置失败',
   settingsSaveFailed: '保存设置失败',
   fetchFailed: '拉取会议状态失败，正在重试…',
+  fetchFailedHint: '若持续失败：确认圆桌会议插件已启用，然后刷新页面；仍未恢复请把上面的错误信息贴到 issue。',
   renderFailed: '面板渲染失败（插件界面报错）',
   renderFailedHint: '上面这条报错就是原因。请连同操作步骤反馈给插件作者；切换到别的页签不受影响，控制台（F12）里有完整堆栈。',
   meetingSelect: '切换会议',
@@ -562,6 +564,7 @@ export const en: Record<RoundTableKey, string> = {
   settingsLoadFailed: 'Failed to load preferences',
   settingsSaveFailed: 'Failed to save preferences',
   fetchFailed: 'Failed to fetch meeting state, retrying…',
+  fetchFailedHint: 'If this keeps happening: check that the RoundTable plugin is enabled, then reload the page; otherwise paste the error above into an issue.',
   renderFailed: 'Panel failed to render (plugin UI error)',
   renderFailedHint: 'The error above is the cause. Please report it with the steps you took; switching to another tab still works, and the console (F12) holds the full stack.',
   meetingSelect: 'Switch meeting',

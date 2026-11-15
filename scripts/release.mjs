@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -183,11 +184,16 @@ async function packTarball() {
   const gz = gzipSync(tarBuf, { level: 9 })
   const unscoped = name.startsWith('@') ? name.slice(name.indexOf('/') + 1) : name
   const filename = `${unscoped}-${version}.tgz`
-  const previewDir = join(root, '.git', 'pack-preview')
+  // 候选 tarball 写到系统临时目录，**不写进 .git/**。
+  //
+  // 早先写 `.git/pack-preview/`：一是 sandbox 与部分 CI 下对 `.git/` 下的写入会
+  // EPERM（踩过），二是 `.git/` 是 git 自己的内部区域，构建脚本往里写文件语义上
+  // 就不对（`git gc` / `prune` 会把它当内部数据）。
+  const previewDir = join(tmpdir(), `dsh-roundtable-pack-preview-${process.pid}`)
   await rm(previewDir, { recursive: true, force: true })
   await mkdir(previewDir, { recursive: true })
   await writeFile(join(previewDir, filename), gz)
-  return { filename, bytes: gz, fileCount: files.length, unpacked: tarBuf.length }
+  return { filename, previewDir, bytes: gz, fileCount: files.length, unpacked: tarBuf.length }
 }
 
 /* ------------------------------------------------------------------ *
@@ -258,6 +264,35 @@ if (!prerelease) {
   record('latest 不会倒退', true, `预发布版不进 latest，本项不适用（渠道：${channel}）`, { fatal: false })
 }
 
+/*
+ * 3b) latest 是否「停滞」。
+ *
+ * 本项目政策：**官方出正式版之前永远不发稳定版**，所以 `latest` 会长期停在
+ * 某一个 rc 上，而 `next` 一路往前走。这不是错误，但它有一个真实的用户后果：
+ * 只写 `npm i <包名>`（不带 @next）的人、以及按 `dist-tags.latest` 采集版本的
+ * 插件市场，拿到的都是那个旧 rc —— 版本号看起来"落后好几个版本"却没有任何
+ * 提示。所以这里不拦发布，只把差距摆出来，让人自己决定要不要
+ * `npm dist-tag add <包>@<本次版本> latest`。
+ */
+if (prerelease && info.reachable && info.exists) {
+  const distTags = info.distTags ?? {}
+  const latest = distTags.latest
+  const nextTag = distTags[channel] ?? distTags.next
+  if (latest === undefined) {
+    record('latest 与本次版本的关系', true, 'registry 上没有 latest（只有预发布）', { fatal: false })
+  } else if (latest === version) {
+    record('latest 与本次版本的关系', true, `latest 已指向本次版本 ${version}`, { fatal: false })
+  } else {
+    record(
+      'latest 与本次版本的关系',
+      true,
+      `latest=${latest}（默认安装与市场采集到的版本），本次 ${version} 发布后进入 ${channel}=${nextTag ?? '待发布'}。`
+      + `要让默认安装跟上：npm dist-tag add ${name}@${version} latest`,
+      { fatal: false },
+    )
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * 4) 产物指纹
  * ------------------------------------------------------------------ */
@@ -321,7 +356,7 @@ if (asJson) {
   }
   process.stdout.write(`\n${results.length} 项检查，${fatalFailures.length} 项阻断发布\n`)
   if (fingerprint !== undefined) {
-    process.stdout.write(`\n候选产物：${join('.git', 'pack-preview', fingerprint.filename)}\n`)
+    process.stdout.write(`\n候选产物：${join(fingerprint.previewDir, fingerprint.filename)}\n`)
   }
 }
 

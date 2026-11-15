@@ -10,7 +10,7 @@
  * @module dsh-plugin-roundtable/state
  */
 
-import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import type { FeedbackEntry, KbDigestEntry, KbDigestFile, Meeting, MeetingUtterance, ReviewRecord, UserAction } from './types.ts'
@@ -58,10 +58,15 @@ export function meetingDirOf(stateRoot: string, meetingId: string): string {
  */
 export async function resetMeetingDirectory(stateRoot: string, meetingId: string): Promise<void> {
   await rm(meetingDirOf(stateRoot, meetingId), { recursive: true, force: true })
+  // 同名会议重建时必须清掉 transcript 缓存：否则快照会读到上一场的发言，
+  // 而这正是 P3 想防的那类"对着另一份方案点支持/驳回"。
+  forgetTranscriptCache(stateRoot, meetingId)
 }
 
 /** Cached host atomic writer: `null` = not resolved yet, `undefined` = unavailable. */
 let hostAtomicWriter: ((file: string, text: string) => Promise<void>) | undefined | null = null
+/** 只在第一次降级时记一行，避免每次写盘都刷屏。 */
+let hostWriterWarned = false
 
 /**
  * Resolve the host's atomic writer **without making it a load gate**.
@@ -82,7 +87,14 @@ async function resolveHostWriter(): Promise<((file: string, text: string) => Pro
     hostAtomicWriter = typeof write === 'function'
       ? (file: string, text: string) => write(file, text, { mode: 0o644 })
       : undefined
-  } catch {
+  } catch (error: unknown) {
+    // 降级本身是对的（最小 profile 必须能跑），但**要留痕**：早先这里是空
+    // catch，于是"写入一直走本地实现、没有宿主的跨进程原子保证"这件事
+    // 在任何地方都查不到（L2）。只在第一次记，避免刷屏。
+    if (!hostWriterWarned) {
+      hostWriterWarned = true
+      console.warn(`[roundtable] host atomic writer unavailable, using the local one: ${String(error)}`)
+    }
     hostAtomicWriter = undefined
   }
   return hostAtomicWriter
@@ -267,6 +279,59 @@ export async function appendUtterance(stateRoot: string, meetingId: string, utte
     await mkdir(dir, { recursive: true })
     await appendFile(join(dir, 'transcript.jsonl'), JSON.stringify(utterance) + '\n', 'utf8')
   })
+}
+
+/**
+ * Transcript 读取缓存（M6）。
+ *
+ * ## 为什么需要
+ *
+ * `/state` 快照路由每 1s 被前端拉一次，后端每轮会对**每个工作区的每场会议**
+ * 执行 `readTranscript`：全量读文件 + 全量 `split` + 全量 `JSON.parse`，而调用方
+ * 往往只用到最后 8/20 条（`messages` / `recent`）。实测 8 场会议/341 KB 约
+ * 3 ms（当前无感），但耗时与 transcript 字节**线性**：单场到 5 MB 时单次轮询
+ * 就是几百毫秒，且全部压在 host 事件循环上。
+ *
+ * ## 做法
+ *
+ * 用 `stat` 的 `size + mtimeMs` 作失效键：文件没变就直接返回上一次解析好的
+ * 数组（**零新增 IO**——append-only 的 JSONL 只要大小没变内容就不会变）。
+ * 缓存按 `stateRoot + meetingId` 分桶，并限制条目数，避免长跑进程累积。
+ *
+ * 返回值是共享数组，调用方**只读**（内部各条 utterance 也按只读对待）。
+ */
+const TRANSCRIPT_CACHE_LIMIT = 64
+const transcriptCache = new Map<string, { size: number; mtimeMs: number; utterances: MeetingUtterance[] }>()
+
+/** 读某一会议的 transcript（带 stat 缓存）。 */
+export async function readTranscriptCached(stateRoot: string, meetingId: string): Promise<MeetingUtterance[]> {
+  const file = join(stateRoot, meetingId, 'transcript.jsonl')
+  const key = `${stateRoot}::${meetingId}`
+  let info
+  try {
+    info = await stat(file)
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      transcriptCache.delete(key)
+      return []
+    }
+    throw error
+  }
+  const hit = transcriptCache.get(key)
+  if (hit !== undefined && hit.size === info.size && hit.mtimeMs === info.mtimeMs) return hit.utterances
+  const utterances = await readTranscript(stateRoot, meetingId)
+  // 简单 FIFO 淘汰：超过上限就丢最早插入的那一条（Map 保持插入序）。
+  if (transcriptCache.size >= TRANSCRIPT_CACHE_LIMIT) {
+    const oldest = transcriptCache.keys().next()
+    if (!oldest.done) transcriptCache.delete(oldest.value)
+  }
+  transcriptCache.set(key, { size: info.size, mtimeMs: info.mtimeMs, utterances })
+  return utterances
+}
+
+/** 会议被删除/重建时清掉对应缓存（否则会读到上一场的内容）。 */
+export function forgetTranscriptCache(stateRoot: string, meetingId: string): void {
+  transcriptCache.delete(`${stateRoot}::${meetingId}`)
 }
 
 /** Read the full transcript, skipping torn tails and malformed lines. */

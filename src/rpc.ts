@@ -23,8 +23,9 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 // Declaration merge only: makes ctx.llm visible for the model-list RPC.
 import type {} from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
+import { auditEndpointDeclarations, checkEndpointGate, ENDPOINT_INDEX } from './rpc-endpoints.ts'
 import { readdir, rm, stat } from 'node:fs/promises'
-import { dirname, extname, isAbsolute, join } from 'node:path'
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import type { EdgeDirection, FeedbackEntry, UserAction } from './types.ts'
 // 偏好形状、净化规则与自持久化存储都住在 preferences.ts：宿主 0.2.0-rc.2 把
 // `settings` 服务重构成 `SettingsForms`（投影 profile 配置），插件不再能注册
@@ -122,16 +123,21 @@ interface RpcConnection {
     ) => unknown  }
 }
 
-/** Run one meeting mutation under the meeting lock, resolving its state root first. */
-async function withMeetingRpcLock<T>(
+/** Run one meeting mutation under the meeting lock, resolving its state root first. */async function withMeetingRpcLock<T>(
   runtime: RoundTableRuntime,
   meetingId: string,
   operation: (stateRoot: string) => Promise<RpcResult<T>>,
-  options: { requireActive?: boolean } = {},
+  options: { requireActive?: boolean; preferredWorkspace?: string } = {},
 ): Promise<RpcResult<T>> {
   const { workspaceOfMeeting } = await import('./edge-helper.ts')
-  const workspace = await workspaceOfMeeting(runtime.stateDir, meetingId)
-  if (workspace === undefined) return fail(`meeting "${meetingId}" not found in any workspace`)
+  // 前端已知会议属于哪个工作区（快照里每场会议都带 `workspace`），传进来就
+  // 只认它 —— 同名会议跨工作区时不会改错对象（M8）。
+  const workspace = await workspaceOfMeeting(runtime.stateDir, meetingId, options.preferredWorkspace)
+  if (workspace === undefined) {
+    return fail(options.preferredWorkspace === undefined
+      ? `meeting "${meetingId}" not found in any workspace`
+      : `meeting "${meetingId}" not found in workspace "${options.preferredWorkspace}"`)
+  }
   const stateRoot = stateRootOf(workspace, runtime.stateDir)
   return withMeetingLock(`meeting:${stateRoot}:${meetingId}`, async () => {
     if (options.requireActive === true) {
@@ -208,6 +214,13 @@ async function applyViewpointStatus(
  * @returns the dispatch function, so the caller can mount it on a web route.
  */
 export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispatch {
+  // 启动时自检声明表（重复、缺说明、global 却要求闸门…）。
+  // 只记日志不阻断：这类问题不该让整个插件不可用，但必须看得见。
+  const declarationProblems = auditEndpointDeclarations()
+  if (declarationProblems.length > 0) {
+    ctx.logger.warn(`roundtable: rpc endpoint declarations need attention:\n  - ${declarationProblems.join('\n  - ')}`)
+  }
+
   const dispatch: RpcDispatch = async (endpoint, payload) => {
     try {
       switch (endpoint) {
@@ -262,9 +275,14 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
             })
           }
           case 'roundtable/edge.set': {
-            const body = payload as { meetingId?: unknown; edgeId?: unknown; direction?: unknown } | undefined
+            const body = payload as { meetingId?: unknown; edgeId?: unknown; direction?: unknown; workspace?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             const edgeId = typeof body?.edgeId === 'string' ? body.edgeId : ''
+            // 客户端知道这场会议属于哪个工作区；带上它，RPC 就不会在同名会议
+            // 跨工作区时改错对象（M8）。
+            const preferredWorkspace = typeof body?.workspace === 'string' && body.workspace.trim() !== ''
+              ? body.workspace.trim()
+              : undefined
             if (meetingId === '' || edgeId === '') return fail('payload must be { meetingId, edgeId, direction }')
             const directionRaw = typeof body?.direction === 'string' ? body.direction : ''
             if (directionRaw !== 'forward' && directionRaw !== 'bidirectional') {
@@ -280,11 +298,14 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               meeting.charter = buildCharter(meeting)
               await writeMeeting(stateRoot, meeting)
               return ok<{ direction: string }>({ direction: edge.direction })
-            }, { requireActive: true })
+            }, { requireActive: true, ...(preferredWorkspace === undefined ? {} : { preferredWorkspace }) })
           }
           case 'roundtable/edge.add': {
-            const body = payload as { meetingId?: unknown; from?: unknown; to?: unknown; direction?: unknown } | undefined
+            const body = payload as { meetingId?: unknown; from?: unknown; to?: unknown; direction?: unknown; workspace?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const preferredWorkspace = typeof body?.workspace === 'string' && body.workspace.trim() !== ''
+              ? body.workspace.trim()
+              : undefined
             const from = typeof body?.from === 'string' ? body.from.trim() : ''
             const to = typeof body?.to === 'string' ? body.to.trim() : ''
             if (meetingId === '' || from === '' || to === '') return fail('payload must be { meetingId, from, to, direction }')
@@ -305,12 +326,15 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               meeting.charter = buildCharter(meeting)
               await writeMeeting(stateRoot, meeting)
               return ok({ edgeId: edge.id, from: edge.from, to: edge.to, direction: edge.direction })
-            }, { requireActive: true })
+            }, { requireActive: true, ...(preferredWorkspace === undefined ? {} : { preferredWorkspace }) })
           }
           case 'roundtable/edge.remove': {
-            const body = payload as { meetingId?: unknown; edgeId?: unknown } | undefined
+            const body = payload as { meetingId?: unknown; edgeId?: unknown; workspace?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             const edgeId = typeof body?.edgeId === 'string' ? body.edgeId : ''
+            const preferredWorkspace = typeof body?.workspace === 'string' && body.workspace.trim() !== ''
+              ? body.workspace.trim()
+              : undefined
             if (meetingId === '' || edgeId === '') return fail('payload must be { meetingId, edgeId }')
             return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
@@ -320,11 +344,14 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               meeting.charter = buildCharter(meeting)
               await writeMeeting(stateRoot, meeting)
               return ok({ removed: before !== meeting.edges.length })
-            }, { requireActive: true })
+            }, { requireActive: true, ...(preferredWorkspace === undefined ? {} : { preferredWorkspace }) })
           }
           case 'roundtable/meeting.delete': {
-            const body = payload as { meetingId?: unknown } | undefined
+            const body = payload as { meetingId?: unknown; workspace?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const preferredWorkspace = typeof body?.workspace === 'string' && body.workspace.trim() !== ''
+              ? body.workspace.trim()
+              : undefined
             if (meetingId === '') return fail('payload must be { meetingId }')
             return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
@@ -354,8 +381,12 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               provider?: unknown
               model?: unknown
               text?: unknown
+              workspace?: unknown
             } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const preferredWorkspace = typeof body?.workspace === 'string' && body.workspace.trim() !== ''
+              ? body.workspace.trim()
+              : undefined
             const kindRaw = typeof body?.kind === 'string' ? body.kind : ''
             if (meetingId === '' || (kindRaw !== 'add-node' && kindRaw !== 'remove-node' && kindRaw !== 'kb-path' && kindRaw !== 'other')) {
               return fail('payload must be { meetingId, kind, text } with kind in add-node|remove-node|kb-path|other')
@@ -375,7 +406,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               }
               await appendUserAction(stateRoot, meetingId, action)
               return ok({ id: action.id })
-            }, { requireActive: true })
+            }, { requireActive: true, ...(preferredWorkspace === undefined ? {} : { preferredWorkspace }) })
           }
           case 'roundtable/user-actions.list': {
             const body = payload as { meetingId?: unknown } | undefined
@@ -418,33 +449,47 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
             // Knowledge-base path (阅览版): validated, stored on the meeting,
             // never reads file contents. Relative paths resolve against the
             // meeting's own workspace.
-            const body = payload as { meetingId?: unknown; path?: unknown } | undefined
+            const body = payload as { meetingId?: unknown; path?: unknown; workspace?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
             const raw = typeof body?.path === 'string' ? body.path.trim() : ''
+            const preferredWorkspace = typeof body?.workspace === 'string' && body.workspace.trim() !== ''
+              ? body.workspace.trim()
+              : undefined
             if (meetingId === '' || raw === '') return fail('payload must be { meetingId, path }')
             return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return fail<{ path: string }>(`meeting "${meetingId}" not found`)
               const workspace = dirname(stateRoot)
-              const resolved = isAbsolute(raw) ? raw : join(workspace, raw)
+              // 用 `resolve` 而不是 `join`：`join` 只拼接、不折叠 `..`，相对路径
+              // 会带着未规范化的 `../` 一路往下传；`resolve` 折叠成真实路径，行为
+              // 可预期。**绝对路径照原样接受** —— 设置页文案与工具参数本来就允许
+              // 用户填任意目录（"一切以用户为主"）。
+              const resolved = isAbsolute(raw) ? raw : resolve(workspace, raw)
               let info
               try {
                 info = await stat(resolved)
               } catch {
-                return fail<{ path: string }>(`path not found or unreadable: ${resolved}`)
+                // 只回显用户输入，不回显服务端绝对路径：错误信息会走浏览器。
+                return fail<{ path: string }>(`path not found or unreadable: ${raw}`)
               }
-              if (!info.isDirectory()) return fail<{ path: string }>(`path is not a directory: ${resolved}`)
+              if (!info.isDirectory()) return fail<{ path: string }>(`path is not a directory: ${raw}`)
               meeting.kbPath = resolved
               await writeMeeting(stateRoot, meeting)
               return ok({ path: resolved })
-            }, { requireActive: true })
+            }, { requireActive: true, ...(preferredWorkspace === undefined ? {} : { preferredWorkspace }) })
           }
           case 'roundtable/kb.list': {
             // List the first level of the configured knowledge base (names,
             // kinds, formats and sizes only — the browse-only contract).
-            const body = payload as { meetingId?: unknown } | undefined
+            const body = payload as { meetingId?: unknown; workspace?: unknown } | undefined
             const meetingId = typeof body?.meetingId === 'string' ? body.meetingId : ''
+            const preferredWorkspace = typeof body?.workspace === 'string' && body.workspace.trim() !== ''
+              ? body.workspace.trim()
+              : undefined
             if (meetingId === '') return fail('payload must be { meetingId }')
+            // 闸门与 kb.path.set 对称：已结束/归档会议不该再被枚举目录。
+            // 早先这里漏了 `{ requireActive: true }`——其余 5 个变更端点都带，
+            // 只有它没有，是"闸门靠每个 case 手抄"的直接后果（H5）。
             return withMeetingRpcLock(runtime, meetingId, async (stateRoot) => {
               const meeting = await readMeeting(stateRoot, meetingId)
               if (meeting === undefined) return fail<{ path: string }>(`meeting "${meetingId}" not found`)
@@ -452,7 +497,7 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               if (configured === '') return ok({ path: '', configured: false, error: '', files: [] })
               const listing = await listKbDirectory(configured)
               return ok({ path: configured, configured: true, error: listing.error, files: listing.files })
-            })
+            }, { requireActive: true, ...(preferredWorkspace === undefined ? {} : { preferredWorkspace }) })
           }
           case 'roundtable/review.get': {
             // 针锋相对评审状态：前端评审弹窗轮询此接口。
@@ -561,6 +606,45 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
     }
   }
 
+  /**
+   * 闸门守卫：把"端点声明"与"实现是否真加闸门"对账。
+   *
+   * 这一层挡的是 H5 那类事故 —— `kb.list` 漏了 `{ requireActive: true }`，
+   * 而漏写**不会有任何报错**，只有人工比对才能发现。现在：
+   *   - 端点未在 `rpc-endpoints.ts` 登记 → 拒绝（强制登记）；
+   *   - 声明为"要求 active 的会议写入"但实现没传 → 拒绝并说明原因。
+   *
+   * 已知局限：`passedRequireActive` 由下表**人工维护**，不是从实现里自动提取
+   * （自动提取需要把 switch 拆成 handler 表，那是更大的重构）。
+   * 所以这张表的价值在于"改实现时必须同步改这里"，而不是全自动保证。
+   */
+  const ACTIVE_GATED: ReadonlySet<string> = new Set([
+    'roundtable/edge.add',
+    'roundtable/edge.set',
+    'roundtable/edge.remove',
+    'roundtable/user-actions.append',
+    'roundtable/kb.path.set',
+    'roundtable/kb.list',
+  ])
+
+  /**
+   * 带守卫的 dispatch（对外暴露的就是它）。
+   *
+   * 未登记的端点直接拒绝；声明与实现不一致时拒绝并给出明确原因，
+   * 而不是让它静默跑到一个没有闸门的实现里。
+   */
+  const guardedDispatch: RpcDispatch = async (endpoint, payload) => {
+    const gateProblem = checkEndpointGate(endpoint, ACTIVE_GATED.has(endpoint))
+    if (gateProblem !== undefined) {
+      // 未登记端点：交给下方 dispatch 统一回 "unknown endpoint"，
+      // 避免把内部实现细节暴露给浏览器。
+      if (!ENDPOINT_INDEX.has(endpoint)) return dispatch(endpoint, payload)
+      ctx.logger.warn(`roundtable: refusing rpc "${endpoint}": ${gateProblem}`)
+      return fail(`endpoint "${endpoint}" is misconfigured on the host side (gate declaration mismatch)`)
+    }
+    return dispatch(endpoint, payload)
+  }
+
   // Transport 1: the host's generic connection channel (compatibility path).
   // Two arguments only: the 0.1.1-era `{ authority: 'trusted-host' }` trust
   // policy was removed from `connection.rpc.handle` — 0.1.5 declares
@@ -572,13 +656,13 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
   // v0.2.21 aligned this shim with the real signature.
   ctx.inject(['connection'], (connectionCtx) => {
     const connection = connectionCtx.connection as unknown as RpcConnection
-    const disposer: unknown = connection.rpc.handle('/roundtable', dispatch)
+    const disposer: unknown = connection.rpc.handle('/roundtable', guardedDispatch)
     // `connection.rpc.handle` 的返回值形状随 rc 线变过（disposer / undefined /
     // Promise）。形状判定收在 harness-compat 里：不是函数时不注册清理器，
     // 免得多挂一个永远不执行的 effect。
     effectWithOptionalDisposer(connectionCtx, disposer, 'roundtable: rpc channel')
   })
-  return dispatch
+  return guardedDispatch
 }
 
 /** One knowledge-base directory entry (阅览版: name/kind/format/size only). */

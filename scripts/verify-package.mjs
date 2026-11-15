@@ -111,7 +111,15 @@ const libBuilt = await exists(join(root, 'lib', 'index.js'))
 if (!libBuilt && strict) {
   record('lib/ 已构建', false, '未构建：请先 npm run build（--strict 下这是错误）')
 } else if (!libBuilt) {
-  record('lib/ 已构建', true, '未构建 —— 产物检查将跳过（用 --strict 可改为强制）')
+  // 未构建 = **跳过**，不是通过。记成 ok 会让"全绿"这句话在干净 clone 上
+  // 变成假话（lib/ 被 .gitignore 排除），这正是本脚本第 145-151 行批评过的
+  // "恒真检查"那类问题。
+  results.push({
+    name: 'lib/ 已构建',
+    ok: true,
+    skipped: true,
+    detail: '未构建 —— 产物相关检查已跳过（不计为通过；用 --strict 可改为强制失败）',
+  })
 }
 
 const mustShip = [
@@ -176,16 +184,89 @@ if (libBuilt) {
   record('浏览器半体产物 lib/client.js 存在', clientEntry, clientEntry ? 'ok' : '缺失 —— 界面页签不会出现')
 }
 
+// ---------------------------------------------------- README 版本坐标
+
+// 徽章是 README 的第一眼信息，也是最容易忘记回写的地方（曾长期停在 rc.2）。
+// 这里把它纳入门禁：徽章版本必须与 package.json 一致，宿主要求必须与
+// compatibility.json 的 recommendedHost 一致。
+const readme = await readFile(join(root, 'README.md'), 'utf8')
+const recommendedHost = await (async () => {
+  try {
+    const compat = JSON.parse(await readFile(join(root, 'compatibility.json'), 'utf8'))
+    return typeof compat.recommendedHost === 'string' ? compat.recommendedHost : undefined
+  } catch {
+    return undefined
+  }
+})()
+
+// shields.io 的徽章把 `-` 转义成 `--`、`_` 转义成 `__`，所以比较时要还原。
+const unescapeBadge = (value) => value.replace(/__/g, '_').replace(/--/g, '-')
+
+/**
+ * 取某个徽章的**值段**（`badge/<label>-<value>-<color>` 的第二段）。
+ *
+ * shields.io 的转义规则是 `-`→`--`、`_`→`__`、空格→`_`，于是
+ * `v1.0.0-rc.10` 在 URL 里写成 `v1.0.0--rc.10`，而标签/值/颜色之间却用
+ * **单个** `-`。直接正则会在这两种 `-` 之间反复踩坑（试过几种都错）。
+ *
+ * 这里用确定性做法：先按单个 `-` 把所有片段切出来，**从右往左**找第一个
+ * 「颜色形状」的片段（6 位十六进制或颜色名）；它左边那片拼回去就是值
+ * （`--` 还原成 `-`），再左边那片是标签。
+ *
+ * 例：`version-v1.0.0--rc.2-blue`
+ *   → ['version','v1.0.0','','rc.2','blue'] → 颜色='blue' → 值='v1.0.0--rc.2'
+ *   → 还原 → `v1.0.0-rc.2`。
+ */
+function badgeValue(src, label) {
+  const match = new RegExp(`img\\.shields\\.io/badge/${label}-([^"'\\s>]+)`).exec(src)
+  if (match === null) return undefined
+  // 捕获组里**不含**标签本身（标签已由上面的正则前缀消费掉）。
+  const parts = match[1].split('-')
+  const isColor = (part) => /^([0-9A-Fa-f]{6}|[A-Za-z]+)$/.test(part)
+  // 颜色最少占 1 片、值最少占 1 片，所以颜色最多到 parts.length - 2。
+  for (let colorAt = parts.length - 1; colorAt >= 2; colorAt -= 1) {
+    if (!isColor(parts[colorAt])) continue
+    return unescapeBadge(parts.slice(0, colorAt).join('-'))
+  }
+  // 没有颜色段（手写徽章可能省略）：整段就是值。
+  return unescapeBadge(parts.join('-'))
+}
+
+const versionBadge = badgeValue(readme, 'version')
+record(
+  'README 版本徽章与 package.json 一致',
+  versionBadge !== undefined && versionBadge.replace(/^v/, '') === version,
+  versionBadge === undefined
+    ? 'README 里没有 version 徽章（或形状变了），无法核对'
+    : `徽章=${versionBadge} package.json=${version}`,
+)
+
+if (recommendedHost !== undefined) {
+  const hostBadge = badgeValue(readme, 'host')
+  record(
+    'README 宿主徽章与 compatibility.json 一致',
+    hostBadge !== undefined && hostBadge === recommendedHost,
+    hostBadge === undefined
+      ? 'README 里没有 host 徽章，无法核对'
+      : `徽章=${hostBadge} compatibility.json=${recommendedHost}`,
+  )
+}
+
 // ---------------------------------------------------- 输出
 
 const failed = results.filter((result) => !result.ok)
+const skipped = results.filter((result) => result.skipped === true)
 if (asJson) {
   process.stdout.write(JSON.stringify({ version, files, checks: results, ok: failed.length === 0 }, null, 2) + '\n')
 } else {
   const width = Math.max(...results.map((result) => result.name.length))
   for (const result of results) {
-    process.stdout.write(`${result.ok ? '✓' : '✗'} ${result.name.padEnd(width)}  ${result.detail}\n`)
+    const mark = result.ok ? '✓' : '✗'
+    process.stdout.write(`${mark} ${result.name.padEnd(width)}  ${result.detail}\n`)
   }
-  process.stdout.write(`\n发布门禁：${results.length} 项检查，${failed.length} 项失败\n`)
+  process.stdout.write(
+    `\n发布门禁：${results.length} 项检查，${failed.length} 项失败`
+    + `${skipped.length === 0 ? '' : `，${skipped.length} 项跳过（见上）`}\n`,
+  )
 }
 process.exit(failed.length === 0 ? 0 : 1)

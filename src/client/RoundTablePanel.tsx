@@ -30,7 +30,13 @@ export interface RoundTablePanelInjected {
 
 export interface RoundTablePanelProps extends RoundTablePanelInjected {}
 
-/** 左侧列表的轮询间隔（右侧拓扑自己按 1s 轮询，这里只刷新列表，2s 足够）。 */
+/**
+ * 左侧列表的轮询间隔。
+ *
+ * 面板是**唯一的轮询者**：它把拿到的整份快照通过 `providedMeetings` 下传给
+ * 右侧的 `RoundTableView`，后者不再自己拉全量（M3 —— 早先面板 2s + 内嵌视图
+ * 1s 各拉一份跨工作区全量快照，等于双倍负载，而明细视图其实只需要同一份数据）。
+ */
 const POLL_MS = 2000
 
 /** 范围选择的哨兵值：全部工作区。 */
@@ -177,6 +183,9 @@ export function RoundTablePanel(props: RoundTablePanelProps): JSX.Element {
                 rpc={rpc}
                 t={t}
                 initialMeetingId={selected.id}
+                // 面板已经在轮询同一份全量快照：下传给它，视图**不再自己拉**
+                // （M3：早先是 2s + 1s 两份跨工作区全量，重复且浪费）。
+                providedMeetings={meetings}
               />
             </div>
           )}

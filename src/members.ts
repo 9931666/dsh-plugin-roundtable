@@ -83,6 +83,16 @@ const NODE_DENIED_TOOLS: readonly string[] = [
  * 专家会失去该能力但**不会**因此获得额外权限 —— 这是刻意选择的失败方向。
  * `deny` 仍然保留（两者是与关系）：它保证将来有人从本清单里删掉某项时，
  * 主持人专属工具不会顺带被放开。
+ *
+ * ## 适用范围（重要，别误以为它在所有宿主上都生效）
+ *
+ * 0.2.1 起宿主把 per-child 的 `toolFilter` 从 `startActivation` 契约里去掉了，
+ * 所以**在 0.2.2 上 `allow` 分支根本走不到**：专家的工具边界退化为 persona 里
+ * 的文字约束（见 prompt.ts 的「你是专家不是主持人」那条）。本清单只对仍走
+ * `startContinuable` 的旧宿主有效。
+ *
+ * 不删的原因：删掉等于放弃旧宿主上的硬边界；而且它是将来把边界补回新宿主时
+ * 现成的声明。真正要修的是**新宿主上的落点**，不是这份清单本身。
  */
 const NODE_ALLOWED_TOOLS: readonly string[] = [
   // 只读本地信息 + 写自己的产出
@@ -317,18 +327,17 @@ export function steerCaptain(captain: Agent, text: string): boolean {
   }
 }
 
-/** Resolve the real driver activity for durable node ids. */
-export function nodeActivity(
-  ctx: Context,
-  nodes: readonly MeetingNode[],
-): Map<string, 'running' | 'idle' | 'ready'> {
-  const activity = new Map<string, 'running' | 'idle' | 'ready'>()
-  for (const node of nodes) {
-    if (node.id === '' || !ACTIVE_NODE_STATUSES.includes(node.status)) continue
-    const live = ctx.agents.get(node.id as SessionId)
-    activity.set(node.key, live === undefined ? 'ready' : live.status)
-  }
-  return activity
-}
+// 已删除：`nodeActivity()`（M12）。
+//
+// 它是"根据 durable node id 读真实驱动状态"的旧实现，但**全仓零调用**：
+// 快照路径（snapshot.ts）自己内联了同一段逻辑，而且两者已经分叉 ——
+// `reconcileNodeLiveness`（node-events.ts）会给出 `missing`（宿主目录里已经没有
+// 这个子代理），而这段旧实现只会给 `ready`。前端 `nodeStatusLabel` 专门处理
+// `missing`，于是"进程已死"的节点在界面上永远显示"就绪"——正是 node-events.ts
+// 文档里说要修的那个 bug 在快照路径上的残留。
+//
+// 保留两个行为点，别一起删：
+//   - `reconcileNodeLiveness` 才是唯一真值来源（含 missing 判定）；
+//   - 快照要接的是它，而不是再复制一份"live ? status : ready"。
 
 export { CAPTAIN_KEY }

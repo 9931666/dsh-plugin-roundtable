@@ -38,6 +38,14 @@ export interface RoundTableViewProps extends RoundTableViewInjected {
    * 既有行为（默认落到列表第一场）。
    */
   initialMeetingId?: string
+  /**
+   * 外部已提供的会议快照（全局面板用）。
+   *
+   * 给定时本组件**不再自己轮询**：`/state` 每 1s 对每个工作区全量读盘，而
+   * 全局面板已经在按自己的节奏拉同一份数据并把结果传下来。两处各自拉一次全量
+   * 是纯浪费（M3）。缺省（会话标签页）行为完全不变：自己按 1s 轮询。
+   */
+  providedMeetings?: WireMeeting[]
 }
 
 interface Point { x: number; y: number }
@@ -124,22 +132,6 @@ function layoutPositions(size: { w: number; h: number }, meeting: WireMeeting): 
     })
   })
   return positions
-}
-
-/** Shorten a segment by the node radius at both ends and return arrow tips. */
-function edgeGeometry(from: Point, to: Point): { x1: number; y1: number; x2: number; y2: number; angle: number } {
-  const dx = to.x - from.x
-  const dy = to.y - from.y
-  const length = Math.max(1, Math.hypot(dx, dy))
-  const ux = dx / length
-  const uy = dy / length
-  return {
-    x1: from.x + ux * NODE_RADIUS,
-    y1: from.y + uy * NODE_RADIUS,
-    x2: to.x - ux * NODE_RADIUS,
-    y2: to.y - uy * NODE_RADIUS,
-    angle: Math.atan2(dy, dx),
-  }
 }
 
 /** SVG arrowhead polygon points at (x, y) pointing along `angle`. */
@@ -303,7 +295,16 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // C2 驳回必填理由：当前正在填写驳回理由的观点 id（null = 无进行中的驳回输入）。
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectDraft, setRejectDraft] = useState('')
+  // 失败状态：**保留原因**，不只是布尔。
+  //
+  // 早先这里只有 `fetchFailed: boolean`，两处 `catch {}` 把 HTTP 状态与错误
+  // 消息全部丢掉。用户看到「拉取失败，正在重试…」时没有任何可操作信息，也报不
+  // 出问题（M2）。现在把原因存下来并显示，同时连续失败时降频，避免每 1s 打一次
+  // 已经坏掉的接口。
   const [fetchFailed, setFetchFailed] = useState(false)
+  const [fetchError, setFetchError] = useState('')
+  /** 连续失败次数（成功一次即清零），用于指数退避。 */
+  const failStreak = useRef(0)
   const [menu, setMenu] = useState<EdgeMenuState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   // 缺陷 5：拖拽的最新坐标放 ref —— mousemove 读它并同步更新，setDrag 只按 rAF 帧率走，
@@ -354,15 +355,29 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
     }, 180)
   }, [])
 
+  /** 成功一次就把失败状态与退避计数清零。 */
+  const noteFetchOk = useCallback((): void => {
+    failStreak.current = 0
+    setFetchFailed(false)
+    setFetchError('')
+  }, [])
+
+  /** 记一次失败：保留可读原因，并累计退避次数。 */
+  const noteFetchFailed = useCallback((error: unknown): void => {
+    failStreak.current += 1
+    setFetchFailed(true)
+    setFetchError(error instanceof Error ? error.message : String(error))
+  }, [])
+
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const next = await fetchMeetings(showAll ? undefined : String(sessionId))
       setMeetings(next)
-      setFetchFailed(false)
-    } catch {
-      setFetchFailed(true)
+      noteFetchOk()
+    } catch (error: unknown) {
+      noteFetchFailed(error)
     }
-  }, [sessionId, showAll])
+  }, [sessionId, showAll, noteFetchOk, noteFetchFailed])
 
   // Load the 互通 preference once; it decides whether this tab lists every
   // meeting in the workspace (on) or only meetings this conversation started.
@@ -386,10 +401,26 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const panelClass = (id: string): string =>
     [styles.panel, hiddenPanels.includes(id) ? styles.panelHidden : ''].filter(Boolean).join(' ')
 
-  // Poll the snapshot every second.
+  // 外部提供的快照优先：全局面板把同一份数据下传时，本组件不再自己轮询（M3）。
+  const externalMeetings = props.providedMeetings
+  const usingExternal = Array.isArray(externalMeetings)
+
+  // Poll the snapshot，失败时指数退避。
+  //
+  // 为什么不是固定 1s：接口已经坏掉（插件未启用 / 路由 404 / 网络断）时，
+  // 每秒重试一次只会刷满控制台与宿主日志，用户体验没有任何改善。连续失败 3 次
+  // 后退到 5s，再往后退到 15s；一旦成功立刻回到 1s。
   useEffect(() => {
+    // 外部提供快照时不轮询：数据由上层驱动（见 `providedMeetings` 的说明）。
+    if (usingExternal) return
     let alive = true
     let inflight = false
+    let timer: number | undefined
+    const schedule = (): void => {
+      const failures = failStreak.current
+      const delay = failures >= 5 ? 15000 : failures >= 3 ? 5000 : 1000
+      timer = window.setTimeout(() => { void tick() }, delay)
+    }
     const tick = async (): Promise<void> => {
       if (inflight) return
       inflight = true
@@ -397,21 +428,21 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         const next = await fetchMeetings(showAll ? undefined : String(sessionId))
         if (alive) {
           setMeetings(next)
-          setFetchFailed(false)
+          noteFetchOk()
         }
-      } catch {
-        if (alive) setFetchFailed(true)
+      } catch (error: unknown) {
+        if (alive) noteFetchFailed(error)
       } finally {
         inflight = false
+        if (alive) schedule()
       }
     }
     void tick()
-    const timer = window.setInterval(() => { void tick() }, 1000)
     return () => {
       alive = false
-      window.clearInterval(timer)
+      if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [sessionId, showAll])
+  }, [sessionId, showAll, noteFetchOk, noteFetchFailed, usingExternal])
 
   // Measure the canvas with a hard fallback. Some host containers report a
   // 0 box on first paint (flex under a yet-unsized slot), which would leave
@@ -453,7 +484,15 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
   // Selected meeting (kept stable while the polled list refreshes), falling
   // back to the first meeting when the selection is missing or unset.
-  const meeting = meetings.find((candidate) => candidate.id === selectedId) ?? meetings[0]
+  /**
+   * 本视图展示的会议列表：外部下传优先，否则用自己轮询到的。
+   *
+   * 用别名而不是把外部值塞进 state —— 外部数据由上层持有，往 state 里同步会
+   * 引入一层「props 变化 → effect → setState → 再渲染」，既多余又容易和轮询
+   * 打架。
+   */
+  const shownMeetings = usingExternal ? externalMeetings as WireMeeting[] : meetings
+  const meeting = shownMeetings.find((candidate) => candidate.id === selectedId) ?? shownMeetings[0]
 
   // 面板传入的首选会议：只在第一次拿到非空列表时应用一次。
   // 用 ref 记住"已经应用过"，所以之后用户在顶部下拉里手动切换不会被它抢回；
@@ -461,19 +500,49 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const initialSelectionApplied = useRef(false)
   useEffect(() => {
     if (initialSelectionApplied.current) return
-    if (initialMeetingId === undefined || meetings.length === 0) return
-    if (!meetings.some((candidate) => candidate.id === initialMeetingId)) return
+    if (initialMeetingId === undefined || shownMeetings.length === 0) return
+    if (!shownMeetings.some((candidate) => candidate.id === initialMeetingId)) return
     initialSelectionApplied.current = true
     setSelectedId(initialMeetingId)
-  }, [initialMeetingId, meetings])
+  }, [initialMeetingId, shownMeetings])
+
+  /**
+   * 会话切换时清掉选中态。
+   *
+   * 宿主会在**同一个 slot 实例**里换 `sessionId`（React 复用组件，不会重新
+   * 挂载）。若这时 `selectedId` 仍指向上一个会话选过的会议、而新会话的列表里
+   * 没有它，上面的 `?? meetings[0]` 就会**静默回落到别的对话的会议**——用户
+   * 看着自己的对话，操作（尤其是删除按钮）却作用在别人的会议上（M1）。
+   * 清空之后语义回到"当前列表的第一场"，并且下拉框显示的是真实选中的那场。
+   *
+   * 这个 effect 必须排在 `initialSelectionApplied` 声明之后（它要复位那个 ref）。
+   */
+  const lastSessionId = useRef(sessionId)
+  useEffect(() => {
+    if (lastSessionId.current === sessionId) return
+    lastSessionId.current = sessionId
+    setSelectedId(undefined)
+    // 换会话后，`initialMeetingId` 的"只应用一次"标记也要复位：
+    // 全局面板里换会议是靠 key 重新挂载，但 tab 这里是同一实例。
+    initialSelectionApplied.current = false
+  }, [sessionId])
 
   // E1：会议结束（status ended）且反馈开启、本会议尚未问过 → 弹轻量反馈。
+  //
+  // `feedbackAutoShown` 是必需的：`meeting` 每 1s 被新快照替换成新对象，effect
+  // 因此每秒重跑；而"关掉弹窗"只把 `askFeedbackFor` 置 null、并不会写
+  // `askedFeedback`（那是"已经评过分"）。少了这道 ref，用户一点关闭，下一秒
+  // effect 又把同一个会议弹回来 —— 右下角反馈条永远关不掉。与评审弹窗用的是
+  // 同一套"每个会议只自动弹一次"的口径（见 reviewAutoShown）。
+  const feedbackAutoShown = useRef<string | null>(null)
   useEffect(() => {
     if (meeting === undefined || !feedbackEnabled) return
     if (meeting.status !== 'ended') return
     if (askFeedbackFor !== null) return
     if (askedFeedback.has(meeting.id)) return
+    if (feedbackAutoShown.current === meeting.id) return
     // 带评审的会议在评审窗口关闭后仍属 ended；统一在 ended 时问一次即可。
+    feedbackAutoShown.current = meeting.id
     setAskFeedbackFor(meeting.id)
     setFeedbackNote('')
   }, [meeting, feedbackEnabled, askedFeedback, askFeedbackFor])
@@ -492,7 +561,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // 提交反馈（E1/E3）：匿名结构化字段 + 可选一句说明。
   const submitFeedback = (rating: 'good' | 'meh' | 'bad'): void => {
     if (meeting === undefined || askFeedbackFor === null) return
-    const target = meetings.find((candidate) => candidate.id === askFeedbackFor)
+    const target = shownMeetings.find((candidate) => candidate.id === askFeedbackFor)
     const note = feedbackNote.trim()
     void rpc<{ id: string }>('roundtable/feedback.append', {
       meetingId: askFeedbackFor,
@@ -626,9 +695,21 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
 
   // 缺陷 4/5 共用：连线 RPC 只此一处 —— 鼠标拖拽的 mouseup 与端口的键盘激活走同一条
   // 路径，避免键盘与鼠标两套实现各自漂移。
+  /**
+   * 会议所属工作区的显示名，随每个会议级 RPC 一起发给服务端（M8）。
+   *
+   * 快照里每场会议都带 `workspace`，而会议 id 由会议名派生——两个工作区完全可能
+   * 有同名会议。服务端若只按"工作区候选顺序"猜归属，改的可能是**另一个工作区**
+   * 的同名会议，表现为"连线改了但拓扑没变"。带上它服务端就只认这一个工作区。
+   */
+  const workspaceTag = (id: string): { workspace?: string } => {
+    const target = shownMeetings.find((candidate) => candidate.id === id)
+    return target === undefined || target.workspace === '' ? {} : { workspace: target.workspace }
+  }
+
   const connectNodes = useCallback((from: string, to: string, meetingId: string): void => {
     if (from === to) return
-    void rpc<unknown>('roundtable/edge.add', { meetingId, from, to, direction: 'forward' })
+    void rpc<unknown>('roundtable/edge.add', { meetingId, from, to, direction: 'forward', ...workspaceTag(meetingId) })
       .then((result) => {
         if (result.ok) {
           setToast({ kind: 'ok', text: `已连接 ${from} → ${to}` })
@@ -724,11 +805,11 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   const handleEdgeAction = useCallback((action: 'forward' | 'bidirectional' | 'remove'): void => {
     if (menu === null) return
     if (action === 'remove') {
-      void rpc<unknown>('roundtable/edge.remove', { meetingId: menu.meetingId, edgeId: menu.edge.id })
+      void rpc<unknown>('roundtable/edge.remove', { meetingId: menu.meetingId, edgeId: menu.edge.id, ...workspaceTag(menu.meetingId) })
         .then(() => refresh())
         .catch(() => undefined)
     } else {
-      void rpc<unknown>('roundtable/edge.set', { meetingId: menu.meetingId, edgeId: menu.edge.id, direction: action })
+      void rpc<unknown>('roundtable/edge.set', { meetingId: menu.meetingId, edgeId: menu.edge.id, direction: action, ...workspaceTag(menu.meetingId) })
         .then(() => refresh())
         .catch(() => undefined)
     }
@@ -741,7 +822,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // the UI — the captain reads and relays them to experts on demand.
   const loadKbList = useCallback((path: string): void => {
     if (meeting === undefined || path === '') return
-    void rpc<WireKbListing>('roundtable/kb.list', { meetingId: meeting.id })
+    void rpc<WireKbListing>('roundtable/kb.list', { meetingId: meeting.id, ...workspaceTag(meeting.id) })
       .then((result) => {
         if (result.ok) {
           setKbListing(result.value)
@@ -776,7 +857,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       setToast({ kind: 'err', text: translate('kbPathRequired') })
       return
     }
-    void rpc<{ path: string }>('roundtable/kb.path.set', { meetingId: meeting.id, path })
+    void rpc<{ path: string }>('roundtable/kb.path.set', { meetingId: meeting.id, path, ...workspaceTag(meeting.id) })
       .then((result) => {
         if (!result.ok) {
           setToast({ kind: 'err', text: result.error?.message ?? translate('kbSaveFailed') })
@@ -979,7 +1060,13 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
       <div className={styles.emptyState}>
         <div className={styles.emptyTitle}>{translate('empty')}</div>
         <div className={styles.emptyHint}>{translate('emptyHint')}</div>
-        {fetchFailed === true ? <div className={styles.fetchFailed}>{translate('fetchFailed')}</div> : null}
+        {fetchFailed === true ? (
+          <div className={styles.fetchFailed}>
+            {translate('fetchFailed')}
+            {fetchError === '' ? null : <span className={styles.fetchErrorDetail}>{fetchError}</span>}
+            <span className={styles.fetchErrorHint}>{translate('fetchFailedHint')}</span>
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -1207,7 +1294,9 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // RoundTableView.module.css（别人的文件，动不得），所以这里把同一份 toast 在有弹窗时
   // 挂到 .root 直属层级，用内联 fixed + z-index 1300 顶到遮罩之上（与遮罩同一套定位
   // 坐标系）；无弹窗时仍留在画布顶部居中，观感零变化。
-  const overlayOpen = kbOpen || manageOpen || (reviewOpen && meeting?.review !== null)
+  // 评审记录的局部别名：让 TS 在整个弹窗块内收窄成非空，替代 15 处 `review!`。
+  const reviewRecord = meeting?.review ?? null
+  const overlayOpen = kbOpen || manageOpen || (reviewOpen && reviewRecord !== null)
   const renderToast = (): JSX.Element | null => toast === null ? null : (
     <div
       className={styles.toast}
@@ -1223,14 +1312,14 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         <div className={styles.header}>
           <div className={styles.titleRow}>
             <span className={styles.meetingName}>{meeting.name}</span>
-            {meetings.length > 1 ? (
+            {shownMeetings.length > 1 ? (
               <select
                 className={styles.meetingSelect}
                 value={meeting.id}
                 onChange={(event) => setSelectedId(event.target.value)}
                 aria-label={translate('meetingSelect')}
               >
-                {meetings.map((candidate) => (
+                {shownMeetings.map((candidate) => (
                   <option key={candidate.id} value={candidate.id}>
                     {sourcePrefix(candidate.captainSessionId)} · {candidate.name}
                   </option>
@@ -1329,7 +1418,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
               onMouseEnter={() => setHoverEdge(dot.id)}
               onMouseLeave={() => clearHoverEdge(dot.id)}
               onClick={() => {
-                void rpc<unknown>('roundtable/edge.remove', { meetingId: meeting.id, edgeId: dot.id })
+                void rpc<unknown>('roundtable/edge.remove', { meetingId: meeting.id, edgeId: dot.id, ...workspaceTag(meeting.id) })
                   .then(() => refresh())
                   .catch(() => undefined)
               }}
@@ -1389,7 +1478,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             onClick={() => {
               const confirmed = window.confirm(translate('meetingDeleteConfirm').replace('{name}', meeting.name))
               if (!confirmed) return
-              void rpc<unknown>('roundtable/meeting.delete', { meetingId: meeting.id })
+              void rpc<unknown>('roundtable/meeting.delete', { meetingId: meeting.id, ...workspaceTag(meeting.id) })
                 .then(() => { setSelectedId(undefined); void refresh() })
                 .catch(() => undefined)
             }}
@@ -1813,7 +1902,15 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           </div>
         </div>
       ) : null}
-      {reviewOpen && meeting?.review !== null ? (
+      {/*
+        评审弹窗：先取出 `review` 再判空。
+        `meeting` 在这里已确定非空，但 `meeting.review` 可能为 null —— 早先用
+        `meeting.review !== null` 做守卫、再让 TS 无法收窄，于是整块写了 15 处
+        `meeting.review!`（非空断言）。任何一次快照里 review 字段异常，就是一个
+        运行时 TypeError，而 SlotBoundary 只能吐白板（M9）。取出局部常量后类型
+        自然收窄，断言全部消失。
+      */}
+      {reviewOpen && reviewRecord !== null ? (
         <div className={styles.manageOverlay} onClick={() => setReviewOpen(false)}>
           <div
             className={styles.reviewModal}
@@ -1824,46 +1921,46 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
             <div className={styles.manageTitle}>
               {translate('reviewTitle')} · {meeting.name}
             </div>
-            {meeting.review!.reviewPass > 0 ? (
+            {reviewRecord.reviewPass > 0 ? (
               <div className={styles.manageHint}>
                 {translate('reviewPassBadge')
-                  .replace('{pass}', String(meeting.review!.reviewPass))
-                  .replace('{max}', String(meeting.review!.maxReviewPass))}
+                  .replace('{pass}', String(reviewRecord.reviewPass))
+                  .replace('{max}', String(reviewRecord.maxReviewPass))}
               </div>
             ) : null}
             <div className={styles.reviewBody}>
               <div className={styles.reviewLeft}>
                 <div className={styles.reviewSectionTitle}>{translate('reviewQuestion')}</div>
-                <div className={styles.reviewQuestion}>{meeting.review!.question}</div>
+                <div className={styles.reviewQuestion}>{reviewRecord.question}</div>
                 <div className={styles.reviewSectionTitle}>{translate('reviewPlan')}</div>
-                <div className={styles.reviewPlan}>{meeting.review!.plan}</div>
+                <div className={styles.reviewPlan}>{reviewRecord.plan}</div>
               </div>
               <div className={styles.reviewRight}>
                 <div className={styles.reviewSectionTitle}>
-                  {translate('reviewViewpoints')}（{meeting.review!.viewpoints.length}）
+                  {translate('reviewViewpoints')}（{reviewRecord.viewpoints.length}）
                 </div>
-                {meeting.review!.status === 'ready' ? (
-                  <div className={`${styles.reviewImpactBar} ${meeting.review!.viewpoints.filter((viewpoint) => viewpoint.endorsed).length >= 3 ? styles.reviewImpactWarn : ''}`}>
+                {reviewRecord.status === 'ready' ? (
+                  <div className={`${styles.reviewImpactBar} ${reviewRecord.viewpoints.filter((viewpoint) => viewpoint.endorsed).length >= 3 ? styles.reviewImpactWarn : ''}`}>
                     <span>{translate('reviewImpactTitle')}</span>
                     <span>
-                      {translate('reviewEndorsed')} {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.endorsed).length}
+                      {translate('reviewEndorsed')} {reviewRecord.viewpoints.filter((viewpoint) => viewpoint.endorsed).length}
                     </span>
                     <span>
-                      {translate('reviewRejected')} {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.rejected).length}
+                      {translate('reviewRejected')} {reviewRecord.viewpoints.filter((viewpoint) => viewpoint.rejected).length}
                     </span>
                     <span>
-                      {translate('reviewPending')} {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.status === 'pending').length}
+                      {translate('reviewPending')} {reviewRecord.viewpoints.filter((viewpoint) => viewpoint.status === 'pending').length}
                     </span>
-                    {meeting.review!.viewpoints.filter((viewpoint) => viewpoint.endorsed).length >= 3
+                    {reviewRecord.viewpoints.filter((viewpoint) => viewpoint.endorsed).length >= 3
                       ? <span>{translate('reviewImpactThresholdHint')}</span>
                       : <span>{translate('reviewImpactOk')}</span>}
                   </div>
                 ) : null}
                 <div className={styles.reviewList}>
-                  {meeting.review!.viewpoints.length === 0 ? (
+                  {reviewRecord.viewpoints.length === 0 ? (
                     <div className={styles.panelEmpty}>{translate('reviewEmpty')}</div>
                   ) : (
-                    meeting.review!.viewpoints.map((viewpoint) => {
+                    reviewRecord.viewpoints.map((viewpoint) => {
                       const brand = providerBrand(viewpoint.nodeKey === 'captain' ? '' : viewpoint.nodeKey)
                       return (
                         <div key={viewpoint.id} className={styles.reviewItem}>
@@ -1900,7 +1997,7 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
                             </div>
                           ) : null}
                           <div className={styles.reviewActions}>
-                            {meeting.review!.status === 'done' ? null : (
+                            {reviewRecord.status === 'done' ? null : (
                               <>
                                 <button
                                   type="button"
@@ -2038,7 +2135,18 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
         </div>
       ) : null}
       {overlayOpen ? renderToast() : null}
-      {fetchFailed === true ? <div className={styles.fetchFailed}>{translate('fetchFailed')}</div> : null}
+      {/*
+        会议已加载、但轮询开始失败时也要告诉用户：否则界面继续显示**上一次**
+        成功的快照，看起来一切正常，而实际上已经与磁盘不同步了。带上原因，
+        并给出下一步（这条以前在 `return` 之后，永远不会渲染）。
+      */}
+      {fetchFailed === true ? (
+        <div className={styles.fetchFailed}>
+          {translate('fetchFailed')}
+          {fetchError === '' ? null : <span className={styles.fetchErrorDetail}>{fetchError}</span>}
+          <span className={styles.fetchErrorHint}>{translate('fetchFailedHint')}</span>
+        </div>
+      ) : null}
     </div>
   )
 }

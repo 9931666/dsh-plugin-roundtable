@@ -197,9 +197,13 @@ test('导出：预算行同时给出「发言量粗估」与 provider 上报的�
   assert.ok(md.includes('发言文本粗估'), '必须说清两个数字不是一回事，否则又是在说谎')
 })
 
-test('导出：没有测得真实用量时给 0，而不是 undefined', () => {
+test('导出：没有测得真实用量时明说「不可测」，不再渲染成 0 token', () => {
+  // 旧行为是 `usedTokensReal ?? 0` —— 把"没测到"写成"0 token"，与同一份导出里
+  // 的"发言文本粗估"并排，读者会把它当成账单口径（H4 的根因）。现在要求：
+  // 没测到就说没测到，且永不出现 undefined / 裸的 "：0 token"。
   const md = renderMeetingMarkdown(meeting(), [], [], undefined)
   assert.ok(md.includes('真实用量'))
-  assert.ok(md.includes('：0 token'), '缺省应显式给 0')
+  assert.ok(md.includes('不可测'), '缺省应显式说明不可测')
+  assert.ok(!md.includes('：0 token'), '不许把"没测到"渲染成 0 token')
   assert.ok(!md.includes('undefined'), '导出里出现了 undefined')
 })

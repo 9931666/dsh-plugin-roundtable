@@ -71,8 +71,21 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile
           pnpm build
-          # 预发布后缀自动进 next，稳定版进 latest（与 scripts/release.mjs 的渠道判定一致）。
-          npm publish --provenance --access public
+          # 渠道（tag）必须显式给出：npm 11 起不再按 `-rc.N` 后缀自动推断，
+          # 不写会直接失败（"You must specify a tag using --tag"），而万一被当成
+          # latest，预发布就会顶掉用户的默认安装。
+          #
+          # 规则与 scripts/release.mjs 的渠道判定逐字一致，且本项目的政策是
+          # 「官方出正式版之前永远不发稳定版」：
+          #   带 `-` 的版本（1.0.0-rc.10）→ next
+          #   不带 `-` 的稳定版       → latest（当前不会出现，保留给将来）
+          version="$(node --print "require('./package.json').version")"
+          case "$version" in
+            *-*) tag=next ;;
+            *)   tag=latest ;;
+          esac
+          echo "publishing ${version} to dist-tag ${tag}"
+          npm publish --tag "$tag" --provenance --access public
 
       - name: Publish GitHub release
         if: github.event_name == 'push'

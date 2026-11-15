@@ -5,8 +5,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness 插件">
-  <img src="https://img.shields.io/badge/version-v1.0.0--rc.2-blue" alt="v1.0.0-rc.2">
-  <img src="https://img.shields.io/badge/host-0.2.0--rc.2-202724" alt="Harness 0.2.0-rc.2">
+  <img src="https://img.shields.io/badge/version-v1.0.0--rc.10-blue" alt="v1.0.0-rc.10">
+  <img src="https://img.shields.io/badge/host-0.2.2--rc.1-202724" alt="Harness 0.2.2-rc.1">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license">
 </p>
 
@@ -127,15 +127,13 @@
 ## 安装（一分钟）
 
 > [!NOTE]
-> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.2.0-rc.2+**）。
+> 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（**0.2.2-rc.1+**）。
 >
-> **v1.0.0-rc.2 是宿主适配版。** 宿主 `0.2.0-rc.2` 动了两处真正破坏兼容的地方：
-> ① `settings` 服务被重构成 `SettingsForms`（插件不再能注册自己的配置命名空间，
-> `SettingsScope` 类型消失）→ 本插件的偏好持久化改为**自管**
-> （`<DSH_HOME>/roundtable/preferences.json`）；② `MessageSourceMap` 移除了
-> catch-all 的 `plugin` kind（改为「每个生产者在自己的模块里声明」）→ 本插件
-> 自声明 `roundtable` kind。**0.1.5-rc.3 及更早的宿主不再受支持**（peer 区间与
-> 类型基线各只能有一个版本）。详见 [`release-notes/v1.0.0-rc.2.md`](release-notes/v1.0.0-rc.2.md)。
+> 版本坐标以 `package.json` 为准：插件 `1.0.0-rc.10`、宿主基线 `0.2.2-rc.1`。
+> 上一个**破坏兼容**的宿主变更发生在 `0.2.0-rc.2`（`settings` 服务重构成 `SettingsForms`，
+> 插件不再能注册自己的配置命名空间 → 偏好改为自管；`MessageSourceMap` 移除 catch-all 的
+> `plugin` kind → 本插件自声明 `roundtable` kind）。`0.2.1` 又把子代理契约从
+> `startContinuable` 换成 `startActivation`（persona 并入首条 prompt）。更早的宿主不再受支持。
 
 ```sh
 dsh plugin --profile web add @y9931666/dsh-plugin-roundtable@next
@@ -148,9 +146,9 @@ dsh plugin --profile web add @y9931666/dsh-plugin-roundtable@next
 > `y9931666`，而 `@huanlin` 这个 scope 属于**另一个用户**（他也在发 DSH 插件）。
 > 历史 release-notes 里 `@huanlin/dsh-plugin-roundtable` 的安装命令一律不可用。
 >
-> **这一版是预发布（`1.0.0-rc.2`），所以装的时候要带 `@next`。** npm 对带预发布后缀的
-> 版本不会更新 `latest` 标签，`dsh plugin add @y9931666/dsh-plugin-roundtable` 会报找不到
-> `latest`；`@next` 就是本插件预发布版的固定入口。稳定版发布后才可以省掉 `@next`。
+> **这一版是预发布（`1.0.0-rc.10`），所以装的时候要带 `@next`。** npm 对带预发布后缀的
+> 版本不会更新 `latest` 标签，`dsh plugin add @y9931666/dsh-plugin-roundtable` 可能拿到旧版
+> 或报找不到；`@next` 就是本插件预发布版的固定入口。稳定版发布后才可以省掉 `@next`。
 
 **从源码构建**（要改源码时用；本地安装链接当前目录）：
 
@@ -164,7 +162,7 @@ dsh plugin --profile web add .
 
 装完**重启 DSH**（关窗口 → 重新启动）→ 刷新 Web UI → 设置 → 圆桌会议能读出默认值即可。
 
-**从旧版升级**：宿主必须先升到 **0.2.0-rc.2**；然后 `git pull && pnpm install && pnpm build`，重启 DSH。历史会议记录（`.roundtable/`）本版数据格式未变，可直接沿用；从更早版本（0.1.x 宿主时代）跨上来的会议建议先导出留档。
+**从旧版升级**：宿主必须先升到 **0.2.2-rc.1**；然后 `git pull && pnpm install && pnpm build`，重启 DSH。历史会议记录（`.roundtable/`）数据格式未变，可直接沿用；从更早版本（0.1.x 宿主时代）跨上来的会议建议先导出留档。
 
 > ⚠️ **偏好位置变了**：从宿主 `settings.yaml` 的 `roundtable` 命名空间搬到
 > `<DSH_HOME>/roundtable/preferences.json`。旧命名空间里的值**不会自动迁移**，
@@ -297,15 +295,21 @@ node scripts/generate-logos.mjs   # 替换 src/client/assets/logos/ 下图片后
 
 > `pnpm test` 用的是 Node 标准测试运行器（每个测试文件一个子进程）。在**禁止子进程管道**的环境里（例如 DSH 自带沙箱）它会以 `spawn EPERM` 失败——那是环境限制，不是测试失败；改用 `pnpm test:inline` 即可（需要 Node ≥ 22.8）。
 
-### 工程门禁（v1.0.0-rc.1 新增）
+### 工程门禁
 
 ```sh
 pnpm compatibility   # 宿主支持矩阵一致性：矩阵 / devDeps / peer / 源码能力清单
-pnpm verify:package  # 发布门禁：files、入口文件、.ts 残留、每个模块在产物里有痕迹
+pnpm verify:package  # 发布门禁：files、入口文件、.ts 残留、README 版本徽章与 package.json 一致
 pnpm doctor          # 只读诊断：宿主与插件版本、混装、cordis 实例同一性
-pnpm release         # 发布护栏：渠道判定、防 latest 倒退、产物 SHA-256（不自动发布）
-pnpm publish:guard   # 上面三项串起来跑一遍，全绿才算可发（渠道是 GitHub，不发 npm）
+pnpm release         # 发布护栏：渠道判定、防 latest 倒退、latest 停滞提示、产物 SHA-256（不自动发布）
+pnpm guard:lockfile  # pnpm-lock.yaml 与 package.json 的 @deepseek-ai/* 依赖逐项一致
+pnpm publish:guard   # 串起上面全部：lockfile → compatibility → verify:package --strict → release
 ```
+
+> `publish:guard` **不含** `pnpm test` 与 `pnpm typecheck`。发布前请自己先跑一遍这两条
+> （或记住：CI 的 `npm publish` 会在 `pnpm install --frozen-lockfile` 处重建产物，但
+> 不会跑测试）。`guard:lockfile` 挡的正是"lock 过期 → CI 的 frozen-lockfile 直接失败"，
+> 这一条曾经让整条发布通道静默失效过。
 
 **宿主基线是唯一真话**：`compatibility.json` 的 `recommendedHost` 决定
 `package.json` 的 devDependencies 该指向哪一版——它决定使用者 `pnpm install`
@@ -333,20 +337,38 @@ pnpm publish:guard   # 上面三项串起来跑一遍，全绿才算可发（渠
 
 ```sh
 pnpm build && pnpm publish:guard                     # 全绿才算可发
-npm publish                                          # 预发布自动进 next，稳定版进 latest
+npm publish --tag next                               # 预发布必须显式给 tag（npm 11 起不再自动推断）
 git tag v<version> && git push origin v<version>     # GitHub Release 的触发点
 ```
 
-- `scripts/release.mjs` 只做**产物快照**：渠道判定、防 latest 倒退、产物 SHA-256
-  与候选 `.tgz`（写到 `.git/pack-preview/`）。它**不调用 npm，也不会替你发布**
+- **渠道规则与本项目的政策**：带 `-` 的版本（`1.0.0-rc.N`）一律发 `next`；稳定版才进
+  `latest`。**官方出正式版之前不发稳定版**，所以这里永远带 `--tag next`。
+  CI（`.github/workflows/publish.yml`）同样按版本后缀显式计算 tag，与 `release.mjs` 一致。
+- `scripts/release.mjs` 只做**产物快照**：渠道判定、防 latest 倒退、**latest 停滞提示**、
+  产物 SHA-256 与候选 `.tgz`（写在系统临时目录）。它**不调用 npm，也不会替你发布**
   —— `npm publish` 那一步永远由人显式执行。
 - **先构建再发布**：`lib/` 不进 git（`.gitignore` 排除了它），`npm publish` 打的是
   你本地磁盘上的 `lib/`。忘了 `pnpm build` 就会把上一次的旧产物发出去。
+- **想让默认安装跟上预发布版**：`npm dist-tag add @y9931666/dsh-plugin-roundtable@<version> latest`。
+  不做这一步，`latest` 会停在旧版，按 `dist-tags.latest` 采集的插件市场也会一直显示旧版本。
 - 用户端装预发布版要带 `@next`：`dsh plugin --profile web add @y9931666/dsh-plugin-roundtable@next`。
 - 本机若 `pnpm install` 报 `ERR_SQLITE_ERROR / unable to open database file`，
   那是 pnpm store 数据库不可用（不是依赖问题）：换一个可写的 store 路径，
   或在能跑 pnpm 的机器上重装后同步 `node_modules`。此状态下也可以直接运行
   `scripts/*.mjs`（它们不依赖 pnpm）。
+
+### 卸载与数据清理
+
+卸载插件**不会**删除你的会议记录与偏好，它们留在下面三处，需要你自己决定删不删：
+
+| 位置 | 内容 | 说明 |
+|---|---|---|
+| `<工作区>/.roundtable/<会议 id>/` | `meeting.json`、`transcript.jsonl`（**完整对话正文**）、`review.json`、`user-actions.jsonl`、`export.md` | 每个用过的工作区各一份；`.gitignore` 已忽略，但**含敏感内容**，不再需要时请手动删除 |
+| `<DSH_HOME>/roundtable/preferences.json` | 默认模式、预算默认值、界面入口开关、角色/阵容预设 | 全局偏好，卸载后可删 |
+| `<工作区>/feedback.jsonl` | 匿名反馈（评分与可选备注） | 工作区级，卸载后可删 |
+
+插件的 web 路由（`/plugins/dsh-plugin-roundtable/state` 与 `/rpc`）通过 `ctx.effect`
+注册，**卸载时会自动撤销**，不需要手动清理。
 
 ## 许可证
 
