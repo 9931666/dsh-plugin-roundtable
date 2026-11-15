@@ -145,12 +145,20 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
       skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
       hiddenPanels: Array.isArray(prefs.hiddenPanels) ? prefs.hiddenPanels : [],
       legendHidden: prefs.legendHidden === true,
+      sidebarEntryEnabled: prefs.sidebarEntryEnabled !== false,
+      conversationTabEnabled: prefs.conversationTabEnabled !== false,
     })
       .then((result) => {
         setSaving(false)
         if (result.ok) {
           setPrefs(result.value)
           setSaved(true)
+          // 两个入口的注册/注销在 client/index.ts（插件 apply 时只读一次偏好），
+          // 所以保存成功后广播一次：宿主侧的注册表不在 React 树里，改不了。
+          // 用 window 上的自定义事件而不是轮询，是为了让"保存即生效"没有延迟。
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('roundtable:prefs-changed'))
+          }
         } else {
           setSaveFailed(true)
         }
@@ -455,6 +463,40 @@ export function RoundTableSettings(props: RoundTableSettingsProps): JSX.Element 
           <span className={styles.switchLabel}>{prefs.showAllMeetings ? t('settingsShowAllOn') : t('settingsShowAllOff')}</span>
         </label>
         <div className={styles.hint}>{t('settingsShowAllHint')}</div>
+      </div>
+      <div className={styles.sectionDivider} />
+      <div className={styles.sectionTitle}><InlineIcon name="entry" />{t('settingsEntryTitle')}</div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('settingsSidebarEntry')}</label>
+        <label className={styles.switchRow}>
+          <input
+            type="checkbox"
+            className={styles.switchInput}
+            checked={prefs.sidebarEntryEnabled !== false}
+            onChange={(event) => patch({ sidebarEntryEnabled: event.target.checked })}
+          />
+          <span className={styles.switchTrack} aria-hidden="true" />
+          <span className={styles.switchLabel}>
+            {prefs.sidebarEntryEnabled !== false ? t('settingsShowAllOn') : t('settingsShowAllOff')}
+          </span>
+        </label>
+        <div className={styles.hint}>{t('settingsSidebarEntryHint')}</div>
+      </div>
+      <div className={styles.field}>
+        <label className={styles.label}>{t('settingsConversationTab')}</label>
+        <label className={styles.switchRow}>
+          <input
+            type="checkbox"
+            className={styles.switchInput}
+            checked={prefs.conversationTabEnabled !== false}
+            onChange={(event) => patch({ conversationTabEnabled: event.target.checked })}
+          />
+          <span className={styles.switchTrack} aria-hidden="true" />
+          <span className={styles.switchLabel}>
+            {prefs.conversationTabEnabled !== false ? t('settingsShowAllOn') : t('settingsShowAllOff')}
+          </span>
+        </label>
+        <div className={styles.hint}>{t('settingsConversationTabHint')}</div>
       </div>
       <div className={styles.sectionDivider} />
       <div className={styles.sectionTitle}><InlineIcon name="panel" />{t('settingsPanelsTitle')}</div>

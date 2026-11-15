@@ -30,6 +30,14 @@ export interface RoundTableViewInjected {
 
 export interface RoundTableViewProps extends RoundTableViewInjected {
   sessionId: SessionId
+  /**
+   * 首屏要选中的会议 id（全局面板用）。
+   *
+   * 面板自己维护「左侧列表选中哪一场」，它把 id 传进来即可；这里只在**第一次**
+   * 拿到会议列表时生效一次，之后用户仍可用顶部下拉自由切换。缺省时不改变任何
+   * 既有行为（默认落到列表第一场）。
+   */
+  initialMeetingId?: string
 }
 
 interface Point { x: number; y: number }
@@ -228,8 +236,10 @@ function nodeListRank(node: { status: string; activity?: string }): number {
   return 1
 }
 
-/** 来源对话短号前缀（显示在会议切换下拉里，区分不同对话开的会议）。 */
-function sourcePrefix(captainSessionId: string): string {
+/** 来源对话短号前缀（显示在会议切换下拉里，区分不同对话开的会议）。
+ *  `export` 是为了让全局只读面板（RoundTablePanel）复用同一套文案，避免两处
+ *  各写一份短号规则后逐渐漂移。 */
+export function sourcePrefix(captainSessionId: string): string {
   if (captainSessionId === '') return '对话'
   return `对话-${captainSessionId.slice(0, 4)}`
 }
@@ -266,7 +276,7 @@ function brandAvatar(brand: { abbr: string; color: string; logo?: string; dark?:
 }
 
 export function RoundTableView(props: RoundTableViewProps): JSX.Element {
-  const { sessionId, rpc, t: translate } = props
+  const { sessionId, rpc, t: translate, initialMeetingId } = props
   // The `sessionId` prop is kept for slot-interface compatibility, but the
   // tab queries ALL meetings in the workspace (no session filter): past
   // meetings stay visible across session switches, updates and restarts.
@@ -444,6 +454,18 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
   // Selected meeting (kept stable while the polled list refreshes), falling
   // back to the first meeting when the selection is missing or unset.
   const meeting = meetings.find((candidate) => candidate.id === selectedId) ?? meetings[0]
+
+  // 面板传入的首选会议：只在第一次拿到非空列表时应用一次。
+  // 用 ref 记住"已经应用过"，所以之后用户在顶部下拉里手动切换不会被它抢回；
+  // 列表还没包含该 id 时（快照尚未刷新到）先不动，等下一次轮询再说。
+  const initialSelectionApplied = useRef(false)
+  useEffect(() => {
+    if (initialSelectionApplied.current) return
+    if (initialMeetingId === undefined || meetings.length === 0) return
+    if (!meetings.some((candidate) => candidate.id === initialMeetingId)) return
+    initialSelectionApplied.current = true
+    setSelectedId(initialMeetingId)
+  }, [initialMeetingId, meetings])
 
   // E1：会议结束（status ended）且反馈开启、本会议尚未问过 → 弹轻量反馈。
   useEffect(() => {

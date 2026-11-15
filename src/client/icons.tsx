@@ -8,7 +8,7 @@
  */
 
 /** 圆桌设置页用到的图标名。新增图标必须同时加进 {@link SHAPES}。 */
-export type IconName = 'panel' | 'skill' | 'role' | 'squad' | 'gauge' | 'message'
+export type IconName = 'panel' | 'skill' | 'role' | 'squad' | 'gauge' | 'message' | 'entry' | 'roundtable'
 
 const SHAPES: Record<IconName, JSX.Element> = {
   // 右栏面板：带分隔的窗口。
@@ -49,6 +49,26 @@ const SHAPES: Record<IconName, JSX.Element> = {
   message: (
     <path d="M3 3.4h10a1.6 1.6 0 0 1 1.6 1.6v5.2A1.6 1.6 0 0 1 13 11.8H8.4L5 14v-2.2H3A1.6 1.6 0 0 1 1.4 10.2V5A1.6 1.6 0 0 1 3 3.4Z" />
   ),
+  // 入口开关：一个向右进入的箭头 + 右侧目标框。
+  entry: (
+    <>
+      <path d="M9.4 3.2h2.9a1.2 1.2 0 0 1 1.2 1.2v7.2a1.2 1.2 0 0 1-1.2 1.2H9.4" />
+      <path d="M2.2 8h7" />
+      <path d="M7 5.6 9.4 8 7 10.4" />
+    </>
+  ),
+  // 侧边栏主导航图标：圆桌 + 三位与会者（中心圆、外圈小圆与连线）。
+  roundtable: (
+    <>
+      <circle cx="8" cy="8" r="2.1" />
+      <circle cx="8" cy="2.6" r="1.3" />
+      <circle cx="3.3" cy="11.7" r="1.3" />
+      <circle cx="12.7" cy="11.7" r="1.3" />
+      <path d="M8 5.9V3.9" />
+      <path d="M6.2 9.2 4.3 10.9" />
+      <path d="M9.8 9.2l1.9 1.7" />
+    </>
+  ),
 }
 
 /** 渲染一个 16×16 线性图标，颜色跟随 `currentColor`。 */
@@ -69,4 +89,16 @@ export function InlineIcon({ name, size = 14 }: { name: IconName; size?: number 
       {SHAPES[name]}
     </svg>
   )
+}
+
+/**
+ * 侧边栏主导航入口的图标组件。
+ *
+ * 宿主 `sidebar.panellist` 的 owner share 是 `{ size, active }`：宽栏传 16、
+ * 窄栏（56px 轨道）传 18，所以这里跟随 owner.size（缺省 16），不能写死 ——
+ * 写死会在折叠态里明显偏小。颜色走 currentColor，随主题与选中态变化。
+ */
+export function RoundTableSidebarIcon(owner: { size?: number } = {}): JSX.Element {
+  const size = typeof owner.size === 'number' && owner.size > 0 ? owner.size : 16
+  return <InlineIcon name="roundtable" size={size} />
 }

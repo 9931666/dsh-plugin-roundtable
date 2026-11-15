@@ -1,0 +1,209 @@
+/* 圆桌全局面板（宿主 main keyed 槽）。
+ *
+ * 与 RoundTableView / RoundTableSettings 共用同一套主题令牌（--dsw-alias-*），
+ * 不硬编码任何亮色：这份面板在深色主题下是主界面，写死背景会直接破功。
+ * 结构是「顶栏 + 左列表 + 右拓扑」，两栏都能独立滚动，外框自己不滚。
+ */
+
+.root {
+  --rt-fs-11: 11px;
+  --rt-fs-12: 12px;
+  --rt-fs-13: 13px;
+  --rt-control-h: 28px;
+  --rt-border: var(--dsw-alias-border-l1);
+  --rt-border-strong: var(--dsw-alias-border-l2);
+  --rt-bg-soft: var(--dsw-alias-bg-layer-2);
+  --rt-fg: var(--dsw-alias-label-primary);
+  --rt-fg-2: var(--dsw-alias-label-secondary);
+  --rt-brand: var(--dsw-alias-brand-primary);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--rt-fg);
+  font-size: var(--rt-fs-13);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rt-border);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--rt-fg);
+}
+
+.scope,
+.refresh {
+  box-sizing: border-box;
+  min-height: var(--rt-control-h);
+  font-size: var(--rt-fs-12);
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--rt-border-strong);
+  background: var(--rt-bg-soft);
+  color: var(--rt-fg);
+  max-width: 240px;
+}
+
+.refresh {
+  cursor: pointer;
+  color: var(--rt-fg-2);
+}
+
+.refresh:hover {
+  color: var(--rt-fg);
+  border-color: var(--rt-brand);
+}
+
+.hint {
+  font-size: var(--rt-fs-11);
+  color: var(--rt-fg-2);
+  line-height: 1.5;
+}
+
+.failed {
+  font-size: var(--rt-fs-11);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---------- 左侧列表（只读） ---------- */
+
+.list {
+  width: 268px;
+  flex: none;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--rt-border);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.listEmpty {
+  padding: 16px 12px;
+  font-size: var(--rt-fs-12);
+  color: var(--rt-fg-2);
+}
+
+.item {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name status'
+    'meta status'
+    'meta2 status';
+  gap: 2px 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rt-fg);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.item:hover {
+  background: var(--rt-bg-soft);
+}
+
+/* 选中态：品牌色左侧细条 + 极淡底，和设置页的开关点亮保持同一套语汇。 */
+.itemActive {
+  border-color: color-mix(in srgb, var(--rt-brand) 45%, transparent);
+  background: color-mix(in srgb, var(--rt-brand) 8%, transparent);
+}
+
+.itemName {
+  grid-area: name;
+  font-size: var(--rt-fs-13);
+  font-weight: 600;
+  color: var(--rt-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemMeta {
+  grid-area: meta;
+  font-size: var(--rt-fs-11);
+  color: var(--rt-fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第二行 meta 复用同样的排版，落在第三行。 */
+.itemMeta + .itemMeta {
+  grid-area: meta2;
+}
+
+.status {
+  grid-area: status;
+  align-self: start;
+  font-size: var(--rt-fs-11);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--rt-border-strong);
+  color: var(--rt-fg-2);
+  white-space: nowrap;
+}
+
+/* 已结束的会议用弱一档的底色，避免和进行中的抢注意力。 */
+.statusEnded {
+  border-color: var(--rt-border);
+  color: var(--rt-fg-2);
+  opacity: 0.8;
+}
+
+/* ---------- 右侧拓扑（复用 RoundTableView） ---------- */
+
+.detail {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.detailView {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* RoundTableView 自己的根节点是 height:100%，这里让它撑满这块 flex 区域。 */
+.detailView > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 窄屏：把左列表压窄，保证拓扑画布还有可用宽度。 */
+@media (max-width: 900px) {
+  .list {
+    width: 200px;
+  }
+
+  .hint {
+    display: none;
+  }
+}

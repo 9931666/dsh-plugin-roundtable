@@ -49,8 +49,38 @@
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   /** Registry of locale namespaces -> dictionary key unions, merged by every client package. */
   interface LocaleNamespaceMap {}
-  /** Registry of declared slot keys, merged by every client package. */
-  interface SlotMap {}
+  /**
+   * Registry of declared slot keys, merged by every client package.
+   *
+   * The two host keys below are declared here because the packages that OWN
+   * them are not devDependencies of this repo:
+   *   - `main` (kind `keyed`) is declared by `@deepseek-ai/dsh-client-ui-layout`
+   *     inside its `root` registration;
+   *   - `sidebar.panellist` (kind `list`) is declared by
+   *     `@deepseek-ai/dsh-client-ui-sidebar`.
+   * Their published shapes are mirrored verbatim from
+   * `dsh-client-ui-layout/lib/types/client/index.d.ts` and
+   * `dsh-client-ui-sidebar/lib/types/client/contract/slots.d.ts` so
+   * `slots.inject('main' | 'sidebar.panellist', …)` typechecks without pulling
+   * either package into `peerDependencies` (that would make them load-gating).
+   */
+  interface SlotMap {
+    /** Central panel selected by a sidebar entry id (host-owned, key = panel id). */
+    'main': {
+      kind: 'keyed'
+      scope: 'root'
+    }
+    /** Root-scoped list of global panel icons; each `id` addresses a `main` key. */
+    'sidebar.panellist': {
+      kind: 'list'
+      scope: 'root'
+      /** Host `SidebarPanelIconOwnerProps`: requested edge in px + selected state. */
+      owner: {
+        size: number
+        active: boolean
+      }
+    }
+  }
 }
 
 declare module '@deepseek-ai/cordis' {

@@ -1,12 +1,24 @@
 /**
  * dsh-plugin-roundtable — browser half.
  *
- * Two registrations:
+ * Four registrations (the first two are the pre-1.0 entries, the last two are
+ * the ones that can be switched off independently in the settings page):
  *   1. `conversation.view` slot, id `roundtable` — the "圆桌会议" topology tab
  *      (left captain anchor, ring of expert nodes, directed edges with arrows,
  *      breathing-light activity, right-click edge menu, drag-to-connect).
  *   2. `settings.section` slot, id `roundtable` — the preference page
- *      (default collaboration mode + budget defaults).
+ *      (default collaboration mode + budget defaults + UI entries).
+ *   3. `sidebar.panellist` slot, id `roundtable` — the left navigation entry;
+ *      the same id addresses the `main` keyed panel below (host contract:
+ *      a list id and the matching main key are the same string).
+ *   4. `main` keyed slot, key `roundtable` — the read-only global panel
+ *      (workspace scope + all meetings on the left, topology on the right).
+ *
+ * Entries 1/3/4 are gated by `conversationTabEnabled` / `sidebarEntryEnabled`.
+ * Those preferences are read once asynchronously after apply (both default to
+ * ON, so the UI keeps its pre-rc.9 shape until the host answers), and the
+ * settings page broadcasts `roundtable:prefs-changed` after a successful save
+ * so this module can dispose and re-register without a page reload.
  *
  * @module @y9931666/dsh-plugin-roundtable/client
  */
@@ -22,6 +34,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { RoundTableView, type RoundTableViewInjected } from './RoundTableView.tsx'
 import { RoundTableSettings, type RoundTableSettingsInjected } from './RoundTableSettings.tsx'
+import { RoundTablePanel, type RoundTablePanelInjected } from './RoundTablePanel.tsx'
+import { RoundTableSidebarIcon } from './icons.tsx'
 import { RoundTableStatusView } from './tool-views.tsx'
 import { withSlotBoundary } from './slot-boundary.tsx'
 import { en, NS, zh } from './locales.ts'
@@ -51,6 +65,15 @@ interface ConnectionHandle {
  * existing for this file's and `locales.ts`'s augmentations).
  */
 type Slots = Context['slots']
+
+/** 两个入口偏好的读回形状（只关心开关，缺字段 = 默认开）。 */
+interface EntryPrefs {
+  sidebarEntryEnabled?: boolean
+  conversationTabEnabled?: boolean
+}
+
+/** `roundtable:prefs-changed`：设置页保存成功后广播的 window 事件名。 */
+const PREFS_CHANGED_EVENT = 'roundtable:prefs-changed'
 
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'roundtable: dictionaries')
@@ -85,14 +108,63 @@ export function apply(ctx: Context): void {
   // Both entries are wrapped in a render-failure boundary: DSH retires a slot
   // entry that throws, which used to make a plugin bug look like "这个 Tab 根本
   // 不存在" with no message. See slot-boundary.tsx.
-  slots.inject('conversation.view', () => slots.register({
-    name: 'conversation.view',
-    id: 'roundtable',
-    order: 30,
-    label: () => ctx.locale.bind(NS)('tab'),
-    locale: NS,
-    inject: viewInjected,
-  }, withSlotBoundary(RoundTableView)))
+  //
+  // 入口按偏好注册/注销（保存设置即生效）。`slots.inject` 的返回值是**幂等**
+  // disposer：注销它既撤掉等待，也跑回调里那份注册的清理，因此保存后重注册
+  // 不会留下重复条目。
+  let tabDisposer: (() => void) | undefined
+  const mountTab = (): void => {
+    if (tabDisposer !== undefined) return
+    tabDisposer = slots.inject('conversation.view', () => slots.register({
+      name: 'conversation.view',
+      id: 'roundtable',
+      order: 30,
+      label: () => ctx.locale.bind(NS)('tab'),
+      locale: NS,
+      inject: viewInjected,
+    }, withSlotBoundary(RoundTableView)))
+  }
+  const unmountTab = (): void => {
+    const dispose = tabDisposer
+    tabDisposer = undefined
+    dispose?.()
+  }
+
+  // ---- Sidebar entry + global panel (sidebar.panellist / main) ---------
+  // 宿主契约（ui-sidebar README + `SidebarPanelIconOwnerProps`）：list 的 id 与
+  // root 作用域 `main` keyed 槽的 key 是**同一个字符串**，点行时宿主自己调
+  // `layout.selectPanel(id)`；面板条目缺失时 selectPanel 抛错且不改选中态。
+  // 所以注册顺序必须是「先 main，后 sidepanel 行」，注销时反序。
+  const panelInjected = (): RoundTablePanelInjected => ({
+    rpc,
+    t: ctx.locale.bind(NS) as (key: string) => string,
+  })
+  let mainDisposer: (() => void) | undefined
+  let rowDisposer: (() => void) | undefined
+  const mountSidebarEntry = (): void => {
+    if (rowDisposer !== undefined) return
+    mainDisposer = slots.inject('main', () => slots.register({
+      name: 'main',
+      key: 'roundtable',
+      locale: NS,
+      inject: panelInjected,
+    }, withSlotBoundary(RoundTablePanel)))
+    rowDisposer = slots.inject('sidebar.panellist', () => slots.register({
+      name: 'sidebar.panellist',
+      id: 'roundtable',
+      order: 40,
+      label: () => ctx.locale.bind(NS)('sidebarEntry'),
+      locale: NS,
+    }, withSlotBoundary(RoundTableSidebarIcon)))
+  }
+  const unmountSidebarEntry = (): void => {
+    const row = rowDisposer
+    rowDisposer = undefined
+    row?.()
+    const main = mainDisposer
+    mainDisposer = undefined
+    main?.()
+  }
 
   // ---- Settings page (settings.section) --------------------------------
   const settingsInjected = (): RoundTableSettingsInjected => ({
@@ -116,6 +188,40 @@ export function apply(ctx: Context): void {
     name: 'tool.call.toolview',
     key: 'roundtable_status',
   }, withSlotBoundary(RoundTableStatusView)))
+
+  // ---- 两个入口的开关 --------------------------------------------------
+  //
+  // 默认先注册（读到偏好之前界面与旧版一致），读到明确的 false 再注销：
+  // RPC 不可用时插件只会"入口都在"，不会"入口都没了"。
+  const syncEntries = (prefs: EntryPrefs | undefined): void => {
+    if (prefs?.conversationTabEnabled !== false) mountTab()
+    else unmountTab()
+    if (prefs?.sidebarEntryEnabled !== false) mountSidebarEntry()
+    else unmountSidebarEntry()
+  }
+  const loadEntryPrefs = (): void => {
+    void rpc<EntryPrefs>('roundtable/prefs.get', {})
+      .then((result) => {
+        if (!result.ok) return
+        syncEntries(result.value)
+      })
+      .catch(() => undefined)
+  }
+  mountTab()
+  mountSidebarEntry()
+  loadEntryPrefs()
+
+  // 设置页保存成功后广播一次；注册表不在 React 树里，只能这样把"保存"接到
+  // "重新注册"。没有 window（SSR / 测试环境）时静默跳过。
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    const onPrefsChanged = (): void => loadEntryPrefs()
+    window.addEventListener(PREFS_CHANGED_EVENT, onPrefsChanged)
+    ctx.effect(
+      () => () => window.removeEventListener(PREFS_CHANGED_EVENT, onPrefsChanged),
+      'roundtable: entry prefs sync',
+    )
+  }
+}
 
 // ---- 已移除：rightbar.session 常驻（v0.2.36 批次遗留，实测会把宿主顶崩）----
 //
@@ -141,5 +247,5 @@ export function apply(ctx: Context): void {
 // 「DO NOT register here」。
 //
 // 结论：single 槽第三方插件一律不碰。会议面板继续由 `conversation.view`
-// 标签页承载（上面第一条注册），能力不减。
-}
+// 标签页 + 上面新增的 `sidebar.panellist`/`main` **list/keyed** 槽承载
+// （后两者是宿主文档明确留给插件追加的席位），能力不减。

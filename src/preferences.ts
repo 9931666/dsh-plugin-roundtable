@@ -86,6 +86,10 @@ export interface RoundTablePreferences {
   readonly hiddenPanels: string[]
   /** A1：画布图例是否已被用户关闭（默认 false = 显示）。 */
   readonly legendHidden: boolean
+  /** 侧边栏主导航入口（默认 true）：左侧导航栏的「圆桌会议」入口 + 全局只读面板。 */
+  readonly sidebarEntryEnabled: boolean
+  /** 会话标签页入口（默认 true）：对话页顶部「圆桌会议」标签页。 */
+  readonly conversationTabEnabled: boolean
   /** B3：用户自建角色预设（全局偏好；不预置任何内置角色）。 */
   readonly rolePresets: RolePreset[]
   /** B3+：用户自建阵容预设（一次套用多位专家；同样不预置）。 */
@@ -105,6 +109,9 @@ export function defaultPreferences(defaultMode: RoundTablePreferences['defaultMo
     skillDelivery: 'relay',
     hiddenPanels: [],
     legendHidden: false,
+    // 两个入口默认都开：老用户升级后界面不减能力，想收窄的自己去设置页关。
+    sidebarEntryEnabled: true,
+    conversationTabEnabled: true,
     rolePresets: [],
     squads: [],
   }
@@ -289,6 +296,8 @@ export function normalizePreferences(layer: unknown, base: RoundTablePreferences
     skillDelivery: pick('skillDelivery', base.skillDelivery, asDelivery),
     hiddenPanels: pick('hiddenPanels', base.hiddenPanels, sanitizeHiddenPanels),
     legendHidden: pick('legendHidden', base.legendHidden, asBoolean),
+    sidebarEntryEnabled: pick('sidebarEntryEnabled', base.sidebarEntryEnabled, asBoolean),
+    conversationTabEnabled: pick('conversationTabEnabled', base.conversationTabEnabled, asBoolean),
     rolePresets: pick('rolePresets', base.rolePresets, sanitizeRolePresets),
     squads: pick('squads', base.squads, sanitizeSquads),
   }

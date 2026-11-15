@@ -38,6 +38,19 @@ export type RoundTableKey =
   | 'legendHide'
   | 'settingsLegend'
   | 'settingsLegendHint'
+  | 'sidebarEntry'
+  | 'settingsEntryTitle'
+  | 'settingsSidebarEntry'
+  | 'settingsSidebarEntryHint'
+  | 'settingsConversationTab'
+  | 'settingsConversationTabHint'
+  | 'panelAllWorkspaces'
+  | 'panelRefresh'
+  | 'panelEmpty'
+  | 'panelHint'
+  | 'panelStatusActive'
+  | 'panelStatusEnded'
+  | 'panelMeta'
   | 'settingsSquadTitle'
   | 'settingsSquadHint'
   | 'settingsSquadAdd'
@@ -266,6 +279,19 @@ export const zh: Record<RoundTableKey, string> = {
   legendHide: '关闭图例（可在设置页重新打开）',
   settingsLegend: '画布图例',
   settingsLegendHint: '画布左上角的模式图例。关掉后画布更干净，随时可以在这里或图例上的叉号切换。',
+  sidebarEntry: '圆桌会议',
+  settingsEntryTitle: '界面入口',
+  settingsSidebarEntry: '侧边栏入口',
+  settingsSidebarEntryHint: '在左侧导航栏加一个「圆桌会议」入口，点开是只读的全局面板：顶部按工作区筛选，左侧列出全部会议，右侧看拓扑与发言。关掉后入口与面板一起消失（会议数据不受影响）。',
+  settingsConversationTab: '会话标签页入口',
+  settingsConversationTabHint: '在对话页顶部保留「圆桌会议」标签页。关掉后标签页隐藏；历史会议仍在，可从侧边栏面板查看。',
+  panelAllWorkspaces: '全部工作区',
+  panelRefresh: '刷新',
+  panelEmpty: '暂无会议',
+  panelHint: '只读面板：点击左侧会议切换右侧视图。要开会请回到对话里进行。',
+  panelStatusActive: '进行中',
+  panelStatusEnded: '已结束',
+  panelMeta: '{rounds} 轮 · {experts} 位专家',
   settingsSquadTitle: '阵容预设（一次套用多位专家）',
   settingsSquadHint: '阵容只回答「谁来开会」：它保存几位专家的 key、角色与模型。它不描述「会怎么开」——没有节点、没有连线、没有流程。',
   settingsSquadAdd: '新建阵容',
@@ -488,6 +514,19 @@ export const en: Record<RoundTableKey, string> = {
   legendHide: 'Hide the legend (turn it back on in settings)',
   settingsLegend: 'Canvas legend',
   settingsLegendHint: 'The mode legend in the canvas top-left corner. Hide it to keep the canvas clean; toggle it here or with the × on the legend itself.',
+  sidebarEntry: 'RoundTable',
+  settingsEntryTitle: 'UI entries',
+  settingsSidebarEntry: 'Sidebar entry',
+  settingsSidebarEntryHint: 'Adds a 「RoundTable」 entry to the left navigation. It opens a read-only global panel: filter by workspace at the top, every meeting on the left, topology and contributions on the right. Turning it off removes the entry and the panel (no meeting data is touched).',
+  settingsConversationTab: 'Conversation tab entry',
+  settingsConversationTabHint: 'Keeps the 「RoundTable」 tab in the conversation header. Turning it off hides the tab; past meetings stay and remain reachable from the sidebar panel.',
+  panelAllWorkspaces: 'All workspaces',
+  panelRefresh: 'Refresh',
+  panelEmpty: 'No meetings yet',
+  panelHint: 'Read-only panel: click a meeting on the left to switch the right-hand view. To start a meeting, go back to the conversation.',
+  panelStatusActive: 'active',
+  panelStatusEnded: 'ended',
+  panelMeta: '{rounds} rounds · {experts} experts',
   settingsSquadTitle: 'Squad presets (fill several experts at once)',
   settingsSquadHint: 'A squad only answers "who joins": it stores the key, role and model of several experts. It says nothing about how the meeting runs — no nodes, no edges, no flow.',
   settingsSquadAdd: 'New squad',

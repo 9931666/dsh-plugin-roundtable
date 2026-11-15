@@ -256,6 +256,10 @@ export interface RoundTablePrefs {
   hiddenPanels: string[]
   /** A1：画布图例已被用户关闭（true = 不显示）。默认 false。 */
   legendHidden: boolean
+  /** 侧边栏主导航入口（默认 true）：导航栏「圆桌会议」入口 + 全局只读面板。 */
+  sidebarEntryEnabled: boolean
+  /** 会话标签页入口（默认 true）：对话页顶部「圆桌会议」标签页。 */
+  conversationTabEnabled: boolean
   /** B3：用户自建角色预设（全局；不预置内置角色）。 */
   rolePresets: WireRolePreset[]
   /** B3+：用户自建阵容预设（全局；不预置内置阵容）。 */

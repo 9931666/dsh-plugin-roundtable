@@ -224,6 +224,8 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               skillDelivery: prefs.skillDelivery === 'direct' ? 'direct' : 'relay',
               hiddenPanels: sanitizeHiddenPanels(prefs.hiddenPanels),
               legendHidden: prefs.legendHidden === true,
+              sidebarEntryEnabled: prefs.sidebarEntryEnabled ?? true,
+              conversationTabEnabled: prefs.conversationTabEnabled ?? true,
               rolePresets: sanitizeRolePresets(prefs.rolePresets),
               squads: sanitizeSquads(prefs.squads),
             })
@@ -253,6 +255,8 @@ export function registerRpc(ctx: Context, runtime: RoundTableRuntime): RpcDispat
               skillDelivery: next.skillDelivery === 'direct' ? 'direct' : 'relay',
               hiddenPanels: sanitizeHiddenPanels(next.hiddenPanels),
               legendHidden: next.legendHidden === true,
+              sidebarEntryEnabled: next.sidebarEntryEnabled ?? true,
+              conversationTabEnabled: next.conversationTabEnabled ?? true,
               rolePresets: sanitizeRolePresets(next.rolePresets),
               squads: sanitizeSquads(next.squads),
             })
