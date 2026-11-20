@@ -1459,6 +1459,16 @@ export function RoundTableView(props: RoundTableViewProps): JSX.Element {
           )}
           {overlayOpen ? null : renderToast()}
         </div>
+        {/*
+          汇聚网关摘要：**贴在画布底边左侧的悬浮条**，不再占据画布下方的独立一行。
+
+          早先它是 `<details>` 排在画布之后、走文档流 —— 于是永远贴在最底部，而画布
+          高度是自适应的：窗口一矮，这条就被挤出可视区，用户得先往下滚才能点到那个
+          小三角（实测很难点）。现在改成挂在 `.main` 列上的绝对定位元素，`bottom`
+          对齐画布底边，展开时向上生长 —— 不论窗口多高，它都贴着画面。
+
+          注意不能放进 `.canvas` 里面：画布有 `overflow: hidden`，展开的正文会被裁掉。
+        */}
         <details className={styles.digest}>
           <summary>{translate('gatewayDigest')}</summary>
           <pre className={styles.digestBody}>{meeting.digest || translate('noDigest')}</pre>

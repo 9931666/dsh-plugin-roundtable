@@ -15,6 +15,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* 汇聚网关摘要以绝对定位贴在画布底边，需要这一层做定位上下文。 */
+  position: relative;
 }
 
 .header {
@@ -649,25 +651,67 @@
 
 /* ---------- gateway digest ---------- */
 
+/* 汇聚网关摘要：贴画布底边的悬浮条。
+   早先它走文档流排在画布之后，于是永远贴在面板最底部；画布高度自适应，窗口一矮
+   就被挤出可视区，那个小三角几乎点不到（用户实测反馈）。现在左下角悬浮，
+   展开时**向上**生长（`bottom: 100%`），所以不论窗口多高它都贴着画面。
+   `max-width` 与画布左半区对齐，避免盖住右侧专家节点。 */
 .digest {
-  flex: none;
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 4;
+  max-width: min(520px, calc(100% - 24px));
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 10px;
-  background: var(--dsw-alias-bg-layer-2);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 92%, transparent);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
   font-size: 12px;
 }
 
+/* 收起时只占一行小条，尽量不挡画布。 */
 .digest summary {
   cursor: pointer;
-  padding: 6px 10px;
+  padding: 5px 10px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* 点击区域放大到整条，而不是只有那个小三角。 */
+  min-height: 28px;
+  border-radius: 10px;
+  user-select: none;
+}
+
+.digest summary:hover {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 自绘三角：默认 marker 大小随字体走，小字号里几乎看不见。 */
+.digest summary::before {
+  content: '▸';
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.digest[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.digest[open] summary {
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px 10px 0 0;
 }
 
 .digestBody {
   margin: 0;
-  padding: 0 10px 10px;
-  max-height: 180px;
+  padding: 8px 10px 10px;
+  max-height: min(320px, 50vh);
   overflow: auto;
   font-family: inherit;
   white-space: pre-wrap;
